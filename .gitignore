@@ -1,0 +1,90 @@
+# General
+.DS_Store
+*.log
+*.env
+.env.local
+.env.*.local
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/coverage/
+frontend/.eslintcache
+
+# Backend - Gradle
+backend/.gradle/
+backend/build/
+backend/out/
+backend/bin/
+backend/.gradletasknamecache
+
+# Backend - Gradle Wrapper (keep properties, exclude jar)
+backend/gradle/wrapper/gradle-wrapper.jar
+
+# Backend - Maven (if used)
+backend/target/
+backend/.mvn/
+backend/mvnw
+backend/mvnw.cmd
+
+# Backend - IDE
+backend/.idea/
+backend/*.iml
+backend/.classpath
+backend/.project
+backend/.settings/
+
+# Backend - Spring Boot
+backend/spring-output/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Docker
+docker/volumes/
+
+# OS
+Thumbs.db
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.ruff_cache/
+
+# uv
+.venv/
+uv.lock
