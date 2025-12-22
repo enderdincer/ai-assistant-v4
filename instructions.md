@@ -1,11 +1,9 @@
-1- create a uv python project.
+1- now we will add real sensory processor to the perception system. an audio one.
 
-2- this will be a multi-threaded application so we need a good framework for managing threads and their lifecycles. we should logs from threads too.
+2- a single input should accept many processors. For example, I should be able to add a speech to text model to produce text events from audio then I might add another processor to the same audio input to detect high frequency sound detection or maybe other audio pattern detection processor.
 
-3- Use best practices like build interfaces first to define APIs and depend on the interfaces instead of custom implementations.
+3- in this feature we are only going to the add an STT processor but adding sensory processors to inputs should be flexible.
 
-4- The application will be an ai assistant where there will be different inputs that come from different threads. This should be dynamic. I should be able to add multiple inputs dynamically of different and of the same type of inputs. An example is cameras. I will connect cameras and each stream will be processed by a thread then the thread will produce events. Another example of input type is text or audio.
+4- details about the STT, this is the model we're going to use: https://huggingface.co/nvidia/canary-qwen-2.5b. it's simple. by using this model audio comes as input and transcribed text is produced as an event to the bus.
 
-5- These events will go into a priority queue (as I mentioned build a pub sub interface as I can use Kafka as an implementation later not an in-memory queue. but for now stick with the in-memory queue implementation and interface that is flexible for other things)
-
-6- this whole thing is how the perception module works. call it perception folder and put everything here. there will be other modules like attention etc. but start with this module.
+5- to make it flexible you can make the subscribe function accept a list of sensory processors.
