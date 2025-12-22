@@ -106,6 +106,8 @@ class PerceptionSystem:
 
             if proc_type == "stt":
                 self.add_stt_processor(proc_id, config)
+            elif proc_type == "vision":
+                self.add_vision_processor(proc_id, config)
             else:
                 logger.warning(f"Unknown processor type: {proc_type}")
 
@@ -297,6 +299,41 @@ class PerceptionSystem:
         logger.info(f"Adding STT processor: {processor_id}")
 
         processor = STTProcessor(processor_id, self._event_bus, config)
+        processor.initialize()
+        processor.start()
+
+        self._processor_manager.register_processor(processor)
+
+        return processor
+
+    def add_vision_processor(
+        self, processor_id: str, config: Optional[Dict[str, Any]] = None
+    ) -> "IProcessor":
+        """Add a vision processor dynamically.
+
+        Args:
+            processor_id: Unique identifier for the processor
+            config: Optional processor configuration with keys:
+                - model_name: HuggingFace model (default: "Qwen/Qwen3-VL-2B-Instruct")
+                - device: "auto", "mps", "cuda", or "cpu" (default: "auto")
+                - quantization: "none", "int8", or "int4" (default: "none")
+                - frame_skip: Process every Nth frame (default: 30)
+                - change_threshold: Min change to emit event (default: 0.08)
+                - prompt: VLM prompt (default: descriptive prompt)
+                - max_tokens: Max response tokens (default: 128)
+
+        Returns:
+            IProcessor: The created vision processor
+
+        Raises:
+            ValueError: If processor_id already exists
+            RuntimeError: If vision dependencies are not installed
+        """
+        from ai_assistant.perception.processors import VisionProcessor
+
+        logger.info(f"Adding vision processor: {processor_id}")
+
+        processor = VisionProcessor(processor_id, self._event_bus, config)
         processor.initialize()
         processor.start()
 

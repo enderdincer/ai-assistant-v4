@@ -160,3 +160,56 @@ class AudioTranscriptionEvent(Event):
             data=data,
             priority=priority,
         )
+
+
+@dataclass(frozen=True)
+class VisionDescriptionEvent(Event):
+    """Event containing visual analysis of a camera frame.
+
+    Contains ONLY description and metadata - NO image data.
+    Scene details (objects, people, activities) come from the description text.
+    """
+
+    @staticmethod
+    def create(
+        source: str,
+        description: str,
+        frame_number: int,
+        frame_timestamp: float,
+        processing_time: float,
+        change_score: float,
+        model_name: str,
+        source_event_id: Optional[str] = None,
+        priority: EventPriority = EventPriority.NORMAL,
+    ) -> "VisionDescriptionEvent":
+        """Create a vision description event.
+
+        Args:
+            source: Processor identifier that created this description
+            description: Text description of the image (includes objects, people, activities)
+            frame_number: Frame number from camera source
+            frame_timestamp: Unix timestamp when frame was captured
+            processing_time: Time taken to process in seconds
+            change_score: How different from previous frame (0.0-1.0, 0=identical, 1=completely different)
+            model_name: Name of the VLM model used
+            source_event_id: Optional ID of source CameraFrameEvent for tracing
+            priority: Event priority
+
+        Returns:
+            VisionDescriptionEvent: The created event
+        """
+        data = {
+            "description": description,
+            "frame_number": frame_number,
+            "frame_timestamp": frame_timestamp,
+            "processing_time": processing_time,
+            "change_score": change_score,
+            "model_name": model_name,
+            "source_event_id": source_event_id,
+        }
+        return VisionDescriptionEvent(
+            event_type="vision.description",
+            source=source,
+            data=data,
+            priority=priority,
+        )

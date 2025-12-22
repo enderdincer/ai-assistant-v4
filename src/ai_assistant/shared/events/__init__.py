@@ -6,6 +6,7 @@ from ai_assistant.shared.events.specialized import (
     TextInputEvent,
     AudioSampleEvent,
     AudioTranscriptionEvent,
+    VisionDescriptionEvent,
 )
 from ai_assistant.shared.events.priority_queue import EventPriorityQueue
 from ai_assistant.shared.events.event_bus import EventBus
@@ -18,6 +19,7 @@ __all__ = [
     "TextInputEvent",
     "AudioSampleEvent",
     "AudioTranscriptionEvent",
+    "VisionDescriptionEvent",
     # Queue and bus
     "EventPriorityQueue",
     "EventBus",

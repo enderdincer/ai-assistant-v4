@@ -21,6 +21,16 @@ stt = [
     "soundfile>=0.12.0",
 ]
 
+# Vision processor support (Qwen3-VL via HuggingFace Transformers)
+# Note: Qwen3-VL requires transformers 4.57.0+ (use git install if not yet released)
+vision = [
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+    "transformers>=4.57.0",
+    "accelerate>=0.26.0",
+    "qwen-vl-utils>=0.0.8",
+]
+
 # Development tools
 dev = [
     "pytest>=8.0.0",
@@ -34,7 +44,7 @@ dev = [
 
 # All optional dependencies
 all = [
-    "ai-assistant[stt,dev]",
+    "ai-assistant[stt,vision,dev]",
 ]
 
 [build-system]
