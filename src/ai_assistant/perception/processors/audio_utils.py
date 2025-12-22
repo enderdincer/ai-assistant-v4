@@ -45,10 +45,10 @@ class VoiceActivityDetector:
         self,
         sample_rate: int = 16000,
         threshold: float = 0.5,
-        min_silence_duration: float = 0.5,
-        min_speech_duration: float = 0.25,
-        max_speech_duration: float = 30.0,
-        speech_pad_ms: int = 100,
+        min_silence_duration: float = 0.3,
+        min_speech_duration: float = 0.15,
+        max_speech_duration: float = 45.0,
+        speech_pad_ms: int = 200,
         model_path: Optional[str] = None,
     ) -> None:
         """Initialize VAD.
@@ -77,9 +77,12 @@ class VoiceActivityDetector:
         self._silence_samples = 0
         self._speech_samples = 0
 
-        # Pre-speech buffer for padding
+        # Pre-speech buffer for padding (keeps audio BEFORE speech is detected)
         self._pre_speech_samples = int(speech_pad_ms * sample_rate / 1000)
         self._pre_speech_buffer: list[npt.NDArray[np.float32]] = []
+
+        # Buffer for samples that couldn't be processed (less than window_size)
+        self._pending_samples: Optional[npt.NDArray[np.float32]] = None
 
     def initialize(self) -> None:
         """Initialize the VAD model.
@@ -146,17 +149,12 @@ class VoiceActivityDetector:
         # VAD requires specific window size (512 samples for 16kHz)
         window_size = self._vad_model.window_size()
 
-        # Add samples to appropriate buffer based on state
-        if not self._is_speaking:
-            # Maintain pre-speech buffer for padding
-            self._pre_speech_buffer.append(samples.copy())
-            # Keep only enough for padding
-            total_pre_samples = sum(len(s) for s in self._pre_speech_buffer)
-            while total_pre_samples > self._pre_speech_samples and len(self._pre_speech_buffer) > 1:
-                removed = self._pre_speech_buffer.pop(0)
-                total_pre_samples -= len(removed)
+        # Prepend any pending samples from previous call
+        if self._pending_samples is not None and len(self._pending_samples) > 0:
+            samples = np.concatenate([self._pending_samples, samples])
+            self._pending_samples = None
 
-        # Process in windows
+        # Initialize state for this call
         state = SpeechState.SILENCE if not self._is_speaking else SpeechState.SPEECH_ONGOING
         speech_audio = None
 
@@ -171,18 +169,26 @@ class VoiceActivityDetector:
                 self._speech_samples += window_size
 
                 if not self._is_speaking:
-                    # Speech just started
+                    # Speech just started!
                     self._is_speaking = True
                     state = SpeechState.SPEECH_STARTED
 
-                    # Add pre-speech padding
+                    # Add pre-speech padding from PREVIOUS chunks (not current chunk)
+                    # This ensures we capture audio just before speech was detected
                     if self._pre_speech_buffer:
                         self._speech_buffer.extend(self._pre_speech_buffer)
                         self._pre_speech_buffer.clear()
 
-                # Add current samples to speech buffer
-                if self._is_speaking:
-                    self._speech_buffer.append(window.copy())
+                    # Also add any windows from the CURRENT chunk that came before this one
+                    # These are windows we already processed but didn't add to speech buffer
+                    # because we weren't speaking yet
+                    if offset > 0:
+                        pre_windows = samples[0:offset]
+                        self._speech_buffer.append(pre_windows.copy())
+                        self._speech_samples += len(pre_windows)
+
+                # Add current window to speech buffer
+                self._speech_buffer.append(window.copy())
 
             else:  # Silence
                 if self._is_speaking:
@@ -210,10 +216,32 @@ class VoiceActivityDetector:
             offset += window_size
 
         # Handle remaining samples (less than window_size)
-        if offset < len(samples) and self._is_speaking:
-            remaining = samples[offset:]
-            self._speech_buffer.append(remaining.copy())
-            self._speech_samples += len(remaining)
+        remaining_start = offset
+        if remaining_start < len(samples):
+            remaining = samples[remaining_start:]
+            if self._is_speaking:
+                # If speaking, add to speech buffer
+                self._speech_buffer.append(remaining.copy())
+                self._speech_samples += len(remaining)
+            else:
+                # If not speaking, save for next call to ensure we don't lose samples
+                self._pending_samples = remaining.copy()
+
+        # Update pre-speech buffer AFTER processing (for next call)
+        # Only do this if we're not currently speaking
+        if not self._is_speaking and speech_audio is None:
+            # Add the processed portion of this chunk to pre-speech buffer
+            processed_samples = samples[:remaining_start] if remaining_start > 0 else samples
+            if len(processed_samples) > 0:
+                self._pre_speech_buffer.append(processed_samples.copy())
+                # Keep only enough for padding
+                total_pre_samples = sum(len(s) for s in self._pre_speech_buffer)
+                while (
+                    total_pre_samples > self._pre_speech_samples
+                    and len(self._pre_speech_buffer) > 1
+                ):
+                    removed = self._pre_speech_buffer.pop(0)
+                    total_pre_samples -= len(removed)
 
         return state, speech_audio
 
@@ -230,6 +258,7 @@ class VoiceActivityDetector:
         self._silence_samples = 0
         self._speech_samples = 0
         self._pre_speech_buffer.clear()
+        self._pending_samples = None
         if self._vad_model:
             self._vad_model.reset()
 

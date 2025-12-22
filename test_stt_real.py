@@ -180,11 +180,11 @@ def main():
                 "sample_rate": 16000,
                 "language": "en",
                 "min_confidence": 0.0,
-                # VAD settings
+                # VAD settings - tuned for natural speech capture
                 "vad_threshold": 0.5,  # Speech detection sensitivity (0-1)
-                "vad_min_silence_duration": 0.5,  # Silence duration to end speech (seconds)
-                "vad_min_speech_duration": 0.25,  # Minimum speech to transcribe (seconds)
-                "vad_max_speech_duration": 30.0,  # Max speech before forced split (seconds)
+                "vad_min_silence_duration": 0.3,  # Silence duration to end speech (seconds)
+                "vad_min_speech_duration": 0.15,  # Minimum speech to transcribe (seconds)
+                "vad_max_speech_duration": 45.0,  # Max speech before forced split (seconds)
             },
         )
 
@@ -219,13 +219,14 @@ def main():
     logger.info("Using Voice Activity Detection (VAD) for natural speech boundaries.\n")
     logger.info("How it works:")
     logger.info("  - Speak naturally into your microphone")
-    logger.info("  - Transcription triggers when you pause (0.5s silence)")
+    logger.info("  - Transcription triggers when you pause (0.3s silence)")
+    logger.info("  - Short words like 'yes' and 'no' are captured")
     logger.info("  - Complete sentences will be captured together")
     logger.info("  - Press Ctrl+C to stop\n")
     logger.info("Example phrases to try:")
-    logger.info("  - 'Hello, this is a test of the speech recognition system'")
+    logger.info("  - 'Hello' (single word)")
+    logger.info("  - 'Yes' or 'No' (short words)")
     logger.info("  - 'The quick brown fox jumps over the lazy dog'")
-    logger.info("  - 'Can you hear me clearly?'")
     logger.info("\n" + "=" * 70 + "\n")
 
     # Run and collect transcriptions

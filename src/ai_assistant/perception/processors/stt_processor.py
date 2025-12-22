@@ -38,9 +38,9 @@ class STTProcessor(BaseProcessor):
 
         VAD options:
         vad_threshold: Speech detection threshold 0-1 (default: 0.5)
-        vad_min_silence_duration: Silence duration to end speech in seconds (default: 0.5)
-        vad_min_speech_duration: Minimum speech duration in seconds (default: 0.25)
-        vad_max_speech_duration: Maximum speech duration before forced split (default: 30.0)
+        vad_min_silence_duration: Silence duration to end speech in seconds (default: 0.3)
+        vad_min_speech_duration: Minimum speech duration in seconds (default: 0.15)
+        vad_max_speech_duration: Maximum speech duration before forced split (default: 45.0)
     """
 
     def __init__(
@@ -77,9 +77,9 @@ class STTProcessor(BaseProcessor):
 
         # VAD Configuration
         self._vad_threshold = config.get("vad_threshold", 0.5)
-        self._vad_min_silence = config.get("vad_min_silence_duration", 0.5)
-        self._vad_min_speech = config.get("vad_min_speech_duration", 0.25)
-        self._vad_max_speech = config.get("vad_max_speech_duration", 30.0)
+        self._vad_min_silence = config.get("vad_min_silence_duration", 0.3)
+        self._vad_min_speech = config.get("vad_min_speech_duration", 0.15)
+        self._vad_max_speech = config.get("vad_max_speech_duration", 45.0)
 
         # Components (loaded during initialization)
         self._recognizer = None
