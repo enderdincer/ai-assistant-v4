@@ -14,12 +14,27 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Speech-to-Text processor support (using sherpa-onnx for local inference)
+stt = [
+    "sherpa-onnx>=1.10.0",
+    "sounddevice>=0.4.6",
+    "soundfile>=0.12.0",
+]
+
+# Development tools
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
     "pytest-cov>=4.1.0",
+    "pytest-timeout>=2.2.0",
+    "pytest-mock>=3.12.0",
     "mypy>=1.8.0",
     "ruff>=0.2.0",
+]
+
+# All optional dependencies
+all = [
+    "ai-assistant[stt,dev]",
 ]
 
 [build-system]

@@ -1,7 +1,7 @@
 """Specialized event types for different input sources."""
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional
 import numpy as np
 import numpy.typing as npt
 from ai_assistant.shared.events.event import Event
@@ -106,6 +106,56 @@ class AudioSampleEvent(Event):
         }
         return AudioSampleEvent(
             event_type="audio.sample",
+            source=source,
+            data=data,
+            priority=priority,
+        )
+
+
+@dataclass(frozen=True)
+class AudioTranscriptionEvent(Event):
+    """Event containing audio transcription result from STT processor."""
+
+    @staticmethod
+    def create(
+        source: str,
+        text: str,
+        language: str,
+        confidence: float,
+        audio_duration: float,
+        model_name: str,
+        source_event_id: Optional[str] = None,
+        metadata: Optional[dict[str, Any]] = None,
+        priority: EventPriority = EventPriority.HIGH,
+    ) -> "AudioTranscriptionEvent":
+        """Create an audio transcription event.
+
+        Args:
+            source: Processor identifier that created this transcription
+            text: The transcribed text
+            language: Language code (e.g., 'en', 'es', 'fr')
+            confidence: Confidence score (0.0 to 1.0)
+            audio_duration: Duration of audio in seconds
+            model_name: Name of the STT model used
+            source_event_id: Optional ID of source AudioSampleEvent for tracing
+            metadata: Optional additional metadata
+            priority: Event priority (default HIGH for user input)
+
+        Returns:
+            AudioTranscriptionEvent: The created event
+        """
+        data = {
+            "text": text,
+            "language": language,
+            "confidence": confidence,
+            "audio_duration": audio_duration,
+            "model_name": model_name,
+            "source_event_id": source_event_id,
+            "text_length": len(text),
+            "metadata": metadata or {},
+        }
+        return AudioTranscriptionEvent(
+            event_type="audio.transcription",
             source=source,
             data=data,
             priority=priority,

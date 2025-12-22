@@ -9,6 +9,7 @@ from ai_assistant.shared.interfaces.pubsub import (
 )
 from ai_assistant.shared.interfaces.event_bus import IEventBus
 from ai_assistant.shared.interfaces.input_source import IInputSource
+from ai_assistant.shared.interfaces.processor import IProcessor
 
 __all__ = [
     # Lifecycle
@@ -24,4 +25,6 @@ __all__ = [
     "IEventBus",
     # Input Sources
     "IInputSource",
+    # Processors
+    "IProcessor",
 ]

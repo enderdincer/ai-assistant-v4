@@ -8,13 +8,14 @@ from ai_assistant.shared.logging import (
 )
 from ai_assistant.shared.events import EventBus
 from ai_assistant.shared.threading import ThreadManager
-from ai_assistant.shared.interfaces import IEvent, EventHandler
+from ai_assistant.shared.interfaces import IEvent, EventHandler, IProcessor
 from ai_assistant.perception.input_sources import (
     BaseInputSource,
     CameraInputSource,
     TextInputSource,
     AudioInputSource,
 )
+from ai_assistant.perception.processors import ProcessorManager
 from ai_assistant.perception.core.config import PerceptionConfig
 
 logger = get_logger(__name__)
@@ -24,7 +25,7 @@ class PerceptionSystem:
     """High-level facade for the perception system.
 
     This class provides a simple API for managing the entire perception system,
-    including the event bus, thread manager, and all input sources.
+    including the event bus, thread manager, input sources, and processors.
 
     Example:
         ```python
@@ -38,8 +39,11 @@ class PerceptionSystem:
         # Start the system
         system.start()
 
-        # Add another input source dynamically
-        system.add_text_input('console')
+        # Add an STT processor dynamically
+        system.add_stt_processor('stt_en', {'language': 'en'})
+
+        # Subscribe to transcriptions
+        system.subscribe('audio.transcription', handle_transcription)
 
         # Stop the system
         system.stop()
@@ -68,6 +72,7 @@ class PerceptionSystem:
         # Create core components
         self._event_bus = EventBus(max_queue_size=self._config.max_queue_size)
         self._thread_manager = ThreadManager()
+        self._processor_manager = ProcessorManager()
         self._input_sources: Dict[str, BaseInputSource] = {}
 
         # Register event bus with thread manager
@@ -84,13 +89,25 @@ class PerceptionSystem:
     def start(self) -> None:
         """Start the perception system.
 
-        This starts the event bus, thread manager, and all configured input sources.
+        This starts the event bus, thread manager, processors, and all
+        configured input sources in the correct order.
         """
         logger.info("Starting perception system")
 
-        # Initialize and start all components
+        # Initialize and start core components
         self._thread_manager.initialize_all()
         self._thread_manager.start_all()
+
+        # Create and start processors from configuration
+        for proc_config in self._config.processors:
+            proc_type = proc_config["type"]
+            proc_id = proc_config["processor_id"]
+            config = proc_config.get("config", {})
+
+            if proc_type == "stt":
+                self.add_stt_processor(proc_id, config)
+            else:
+                logger.warning(f"Unknown processor type: {proc_type}")
 
         # Create and start input sources from configuration
         for source_config in self._config.input_sources:
@@ -112,13 +129,17 @@ class PerceptionSystem:
     def stop(self) -> None:
         """Stop the perception system gracefully.
 
-        This stops all input sources and shuts down the thread manager.
+        This stops all input sources, processors, and core components
+        in the correct order.
         """
         logger.info("Stopping perception system")
 
-        # Stop all input sources
+        # Stop all input sources first (stop publishing events)
         for source_id, source in list(self._input_sources.items()):
             self.remove_input_source(source_id)
+
+        # Stop all processors (stop consuming/producing events)
+        self._processor_manager.stop_all()
 
         # Stop thread manager (which stops event bus and pools)
         self._thread_manager.stop_all()
@@ -256,6 +277,85 @@ class PerceptionSystem:
         """
         return {source_id: source.source_type for source_id, source in self._input_sources.items()}
 
+    def add_stt_processor(
+        self, processor_id: str, config: Optional[Dict[str, Any]] = None
+    ) -> "IProcessor":
+        """Add an STT processor dynamically.
+
+        Args:
+            processor_id: Unique identifier for the processor
+            config: Optional processor configuration
+
+        Returns:
+            IProcessor: The created STT processor
+
+        Raises:
+            ValueError: If processor_id already exists
+        """
+        from ai_assistant.perception.processors import STTProcessor
+
+        logger.info(f"Adding STT processor: {processor_id}")
+
+        processor = STTProcessor(processor_id, self._event_bus, config)
+        processor.initialize()
+        processor.start()
+
+        self._processor_manager.register_processor(processor)
+
+        return processor
+
+    def add_processor(self, processor: "IProcessor") -> None:
+        """Add a processor dynamically.
+
+        Args:
+            processor: Processor instance to add
+
+        Raises:
+            ValueError: If processor_id already exists
+        """
+        logger.info(f"Adding processor: {processor.processor_id}")
+
+        processor.initialize()
+        processor.start()
+
+        self._processor_manager.register_processor(processor)
+
+    def remove_processor(self, processor_id: str) -> None:
+        """Remove a processor.
+
+        Args:
+            processor_id: Identifier of the processor to remove
+        """
+        processor = self._processor_manager.get_processor(processor_id)
+
+        if processor is None:
+            logger.warning(f"Processor '{processor_id}' not found")
+            return
+
+        logger.info(f"Removing processor: {processor_id}")
+
+        processor.stop()
+        self._processor_manager.unregister_processor(processor_id)
+
+    def get_processor(self, processor_id: str) -> Optional["IProcessor"]:
+        """Get a processor by ID.
+
+        Args:
+            processor_id: Identifier of the processor
+
+        Returns:
+            Optional[IProcessor]: The processor or None if not found
+        """
+        return self._processor_manager.get_processor(processor_id)
+
+    def list_processors(self) -> Dict[str, str]:
+        """List all active processors.
+
+        Returns:
+            Dict[str, str]: Mapping of processor IDs to processor types
+        """
+        return self._processor_manager.list_processors()
+
     def get_status(self) -> Dict[str, Any]:
         """Get the status of the perception system.
 
@@ -275,5 +375,6 @@ class PerceptionSystem:
                 }
                 for source_id, source in self._input_sources.items()
             },
+            "processors": self._processor_manager.get_status(),
             "thread_manager": self._thread_manager.get_status(),
         }

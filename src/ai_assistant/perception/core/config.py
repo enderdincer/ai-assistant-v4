@@ -11,7 +11,7 @@ class PerceptionConfig:
     """Configuration for the perception system.
 
     This defines all settings for the perception system including
-    logging, threading, event bus, and default input sources.
+    logging, threading, event bus, input sources, and processors.
     """
 
     # Logging configuration
@@ -28,6 +28,9 @@ class PerceptionConfig:
     # Input source configurations
     input_sources: List[Dict[str, Any]] = field(default_factory=list)
 
+    # Processor configurations
+    processors: List[Dict[str, Any]] = field(default_factory=list)
+
     @classmethod
     def default(cls) -> "PerceptionConfig":
         """Create default configuration.
@@ -42,6 +45,7 @@ class PerceptionConfig:
             max_queue_size=1000,
             max_worker_threads=4,
             input_sources=[],
+            processors=[],
         )
 
     @classmethod
@@ -65,3 +69,58 @@ class PerceptionConfig:
             }
         )
         return config
+
+    @classmethod
+    def with_audio_and_stt(
+        cls, audio_source_id: str = "microphone", stt_processor_id: str = "stt", **kwargs: Any
+    ) -> "PerceptionConfig":
+        """Create configuration with audio input and STT processor.
+
+        Args:
+            audio_source_id: Audio source identifier
+            stt_processor_id: STT processor identifier
+            **kwargs: Additional configuration options for STT processor
+
+        Returns:
+            PerceptionConfig: Configuration with audio and STT
+        """
+        config = cls.default()
+
+        # Add audio input source
+        config.input_sources.append(
+            {
+                "type": "audio",
+                "source_id": audio_source_id,
+                "config": {},
+            }
+        )
+
+        # Add STT processor
+        config.processors.append(
+            {
+                "type": "stt",
+                "processor_id": stt_processor_id,
+                "config": kwargs,
+            }
+        )
+
+        return config
+
+    def add_stt_processor(self, processor_id: str, **kwargs: Any) -> "PerceptionConfig":
+        """Add an STT processor configuration.
+
+        Args:
+            processor_id: Processor identifier
+            **kwargs: Processor configuration options
+
+        Returns:
+            PerceptionConfig: Self for method chaining
+        """
+        self.processors.append(
+            {
+                "type": "stt",
+                "processor_id": processor_id,
+                "config": kwargs,
+            }
+        )
+        return self
