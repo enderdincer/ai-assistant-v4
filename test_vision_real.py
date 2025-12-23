@@ -261,11 +261,11 @@ def main():
             {
                 "device_id": 0,  # Default webcam
                 "fps": 30,
-                "width": 640,
-                "height": 480,
+                "width": 416,  # Lower resolution for faster VLM processing
+                "height": 312,  # Maintains 4:3 aspect ratio
             },
         )
-        logger.info("  Camera configured: 640x480 @ 30 FPS")
+        logger.info("  Camera configured: 416x312 @ 30 FPS")
     except Exception as e:
         logger.error(f"\nFailed to initialize camera: {e}")
         logger.error("Make sure your webcam is connected and not in use by another app")
@@ -292,7 +292,7 @@ def main():
                 "frame_skip": 30,  # Process every 30th frame = 1 FPS
                 "change_threshold": 0.08,  # 8% change threshold
                 "prompt": "Describe what you see in this image, including people, objects, and activities.",
-                "max_tokens": 128,
+                "max_tokens": 50,  # Reduced for faster inference (~1.2-1.5s vs 3-5s)
             },
         )
 

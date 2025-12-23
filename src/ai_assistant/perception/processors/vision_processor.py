@@ -62,11 +62,11 @@ class VisionProcessor(BaseProcessor):
         self._model_name = config.get("model_name", "Qwen/Qwen3-VL-2B-Instruct")
         self._device = config.get("device", "auto")
         self._quantization = config.get("quantization", "none")
-        self._max_tokens = config.get("max_tokens", 128)
+        self._max_tokens = config.get("max_tokens", 150)  # Optimized default for speed
 
         # Processing configuration
         self._frame_skip = config.get("frame_skip", 30)
-        self._change_threshold = config.get("change_threshold", 0.08)
+        self._change_threshold = config.get("change_threshold", 0.12)
         self._prompt = config.get(
             "prompt",
             "Describe what you see in this image, including people, objects, and activities.",
@@ -282,7 +282,7 @@ class VisionProcessor(BaseProcessor):
             )
 
             self._logger.info(
-                f"Vision: '{description[:80]}...' "
+                f"Vision: '{description}' "
                 f"(frame={frame_number}, change={change_score:.2f}, time={processing_time:.2f}s)"
             )
 
