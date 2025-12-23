@@ -1,0 +1,27 @@
+services:
+  mqtt-broker:
+    image: eclipse-mosquitto:2.0
+    container_name: ai-assistant-mqtt
+    restart: unless-stopped
+    ports:
+      - "${MQTT_PORT:-1883}:1883"
+      - "${MQTT_WS_PORT:-9001}:9001"
+    volumes:
+      - ./mqtt/config:/mosquitto/config:ro
+      - mqtt-data:/mosquitto/data
+      - mqtt-logs:/mosquitto/log
+    environment:
+      - MQTT_MAX_CONNECTIONS=${MQTT_MAX_CONNECTIONS:-100}
+      - MQTT_MAX_QUEUED_MESSAGES=${MQTT_MAX_QUEUED_MESSAGES:-1000}
+    healthcheck:
+      test: ["CMD", "mosquitto_sub", "-t", "$$SYS/#", "-C", "1", "-i", "healthcheck", "-W", "3"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  mqtt-data:
+    driver: local
+  mqtt-logs:
+    driver: local

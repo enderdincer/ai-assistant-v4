@@ -39,6 +39,11 @@ tts = [
     "sounddevice>=0.4.6",
 ]
 
+# MQTT support for distributed event communication
+mqtt = [
+    "paho-mqtt>=2.0.0",
+]
+
 # Development tools
 dev = [
     "pytest>=8.0.0",
@@ -52,7 +57,7 @@ dev = [
 
 # All optional dependencies
 all = [
-    "ai-assistant[stt,vision,tts,dev]",
+    "ai-assistant[stt,vision,tts,mqtt,dev]",
 ]
 
 [build-system]

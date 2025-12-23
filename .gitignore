@@ -88,3 +88,5 @@ dmypy.json
 # uv
 .venv/
 uv.lock
+
+.downloaded_models
