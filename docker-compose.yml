@@ -20,8 +20,29 @@ services:
       retries: 3
       start_period: 10s
 
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: ai-assistant-qdrant
+    restart: unless-stopped
+    ports:
+      - "${QDRANT_HTTP_PORT:-6333}:6333"
+      - "${QDRANT_GRPC_PORT:-6334}:6334"
+    volumes:
+      - qdrant-data:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+      - QDRANT__SERVICE__HTTP_PORT=6333
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:6333/readyz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
 volumes:
   mqtt-data:
     driver: local
   mqtt-logs:
+    driver: local
+  qdrant-data:
     driver: local
