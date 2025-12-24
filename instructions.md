@@ -1,7 +1,10 @@
-# visual perception
+# new feature: memory
 
-1- we will work on a new processor for visual inputs.
+1- the assistant will have a memory with this feature
 
-2- we are going to use a vlm (qwen3-vl 2b specifically)
+2- There will be three different stores that makes memory:
+2.1- Fact store (can't be overwritten system facts like the assistants name)
+2.2- Event log
+2.3- vector db: this will have different collections for different things. for example a collection for conversation histories (with whole conversations)
 
-3- the flow: camera as input -> default visual processor (what we need to implement it with qwen3-vl 2b) -> produces events that describes the image in detail
+Note: use available databses. You have a qdrant database and a postgres database.

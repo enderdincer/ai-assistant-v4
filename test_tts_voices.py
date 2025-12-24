@@ -19,8 +19,8 @@ from ai_assistant.actions.tts import KokoroTTS, KokoroTTSConfig
 
 
 # Configuration
-MODEL_PATH = Path("kokoro-v1.0.onnx")
-VOICES_PATH = Path("voices-v1.0.bin")
+MODEL_PATH = Path(".downloaded_models/kokoro-v1.0.onnx")
+VOICES_PATH = Path(".downloaded_models/voices-v1.0.bin")
 OUTPUT_DIR = Path("tts_outputs")
 
 

@@ -39,10 +39,31 @@ services:
       retries: 3
       start_period: 10s
 
+  postgres:
+    image: postgres:16-alpine
+    container_name: ai-assistant-postgres
+    restart: unless-stopped
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-ai_assistant}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-ai_assistant_secret}
+      - POSTGRES_DB=${POSTGRES_DB:-ai_assistant}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ai_assistant} -d ${POSTGRES_DB:-ai_assistant}"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
 volumes:
   mqtt-data:
     driver: local
   mqtt-logs:
     driver: local
   qdrant-data:
+    driver: local
+  postgres-data:
     driver: local

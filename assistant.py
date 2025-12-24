@@ -54,8 +54,7 @@ class AssistantConfig:
         default_factory=lambda: os.getenv(
             "SYSTEM_PROMPT",
             "You are a helpful, friendly voice assistant. "
-            "Keep your responses concise and conversational since they will be spoken aloud. "
-            "Aim for 1-3 sentences unless the user asks for detailed information. "
+            "Keep your responses concise unless the user asks for detailed information. "
             "Never use emojis.",
         )
     )
@@ -75,7 +74,7 @@ class AssistantConfig:
             )
         )
     )
-    tts_voice: str = field(default_factory=lambda: os.getenv("TTS_VOICE", "af_heart"))
+    tts_voice: str = field(default_factory=lambda: os.getenv("TTS_VOICE", "am_santa"))
     tts_speed: float = field(default_factory=lambda: float(os.getenv("TTS_SPEED", "1.0")))
     audio_source_id: str = "microphone"
     stt_processor_id: str = "stt"
