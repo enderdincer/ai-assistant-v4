@@ -274,3 +274,36 @@ python -c "from ai_assistant.shared.mqtt import MQTTEventBus; print('MQTT OK')"
 **Status**: Production Ready
 **Default Model**: qwen3:0.6b
 **Default Voice**: af_heart
+
+## Response Filtering (2025-12-23)
+
+### Issue
+The qwen3 model outputs chain-of-thought reasoning wrapped in `<think>...</think>` tags, which should not be spoken aloud by the TTS system.
+
+### Solution
+- Added regex filtering in `_generate_response()` method in `assistant.py`
+- Pattern: `r'<think>.*?</think>\s*'` with `re.DOTALL` flag
+- Removes all thinking content while preserving the actual response
+- Model can still think internally (improving response quality), but thinking is stripped before TTS
+
+### Example
+**Before filtering:**
+```
+<think>Let me calculate 5 times 7...</think>
+
+The answer is 35.
+```
+
+**After filtering:**
+```
+The answer is 35.
+```
+
+### Implementation
+```python
+# In assistant.py _generate_response()
+content = str(message.get("content", ""))
+# Strip <think>...</think> tags and their content
+content = re.sub(r'<think>.*?</think>\s*', '', content, flags=re.DOTALL)
+return content.strip()
+```

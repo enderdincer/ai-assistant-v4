@@ -122,6 +122,7 @@ class OllamaClient:
         options: Optional[Dict[str, Any]] = None,
         format: Optional[str] = None,
         keep_alive: Optional[str] = None,
+        think: Optional[bool] = None,
     ) -> Union[Dict[str, Any], Iterator[Dict[str, Any]]]:
         """
         Generate a chat completion.
@@ -133,6 +134,7 @@ class OllamaClient:
             options: Model-specific options (temperature, top_p, etc.)
             format: Response format ("json" for JSON mode)
             keep_alive: How long to keep model loaded (e.g., "5m", "1h")
+            think: Whether to enable chain-of-thought reasoning (for models that support it)
 
         Returns:
             Response dict or iterator of response chunks if streaming
@@ -156,6 +158,8 @@ class OllamaClient:
             payload["format"] = format
         if keep_alive is not None:
             payload["keep_alive"] = keep_alive
+        if think is not None:
+            payload["think"] = think
 
         if stream:
             response = self._make_request("/api/chat", json_data=payload, stream=True)

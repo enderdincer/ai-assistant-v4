@@ -81,6 +81,9 @@ class STTProcessor(BaseProcessor):
         self._vad_min_speech = config.get("vad_min_speech_duration", 0.15)
         self._vad_max_speech = config.get("vad_max_speech_duration", 45.0)
 
+        # Mute state - when muted, audio is discarded and VAD buffer is cleared
+        self._muted = False
+
         # Components (loaded during initialization)
         self._recognizer = None
         self._vad: Optional[VoiceActivityDetector] = None
@@ -226,6 +229,16 @@ class STTProcessor(BaseProcessor):
             self._vad = None
 
         self._logger.info("STT processor cleaned up")
+
+    def reset_vad(self) -> None:
+        """Reset the VAD state, clearing any buffered audio.
+
+        This is useful when you want to discard any audio that was being
+        captured (e.g., after TTS playback to clear echo from the buffer).
+        """
+        if self._vad is not None:
+            self._vad.reset()
+            self._logger.debug("VAD state reset")
 
     def _process_event(self, event: IEvent) -> list[IEvent]:
         """Process audio sample event using VAD.

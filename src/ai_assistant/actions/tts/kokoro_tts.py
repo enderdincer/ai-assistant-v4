@@ -5,6 +5,7 @@ via ONNX Runtime for efficient inference with audio playback support.
 """
 
 import os
+import threading
 import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -90,6 +91,10 @@ class KokoroTTS:
         self._initialized = False
         self._logger = get_logger(f"{__name__}.KokoroTTS")
 
+        # Playback control
+        self._stop_event = threading.Event()
+        self._playback_thread: Optional[threading.Thread] = None
+
         # Suppress ONNX Runtime warnings
         warnings.filterwarnings("ignore", category=UserWarning, module="onnxruntime")
 
@@ -173,6 +178,53 @@ class KokoroTTS:
             self._logger.error(f"Failed to synthesize speech: {e}")
             raise RuntimeError(f"Speech synthesis failed: {e}") from e
 
+    def estimate_duration(self, text: str) -> float:
+        """Estimate speech duration in milliseconds.
+
+        Uses a simple heuristic based on character count and speech speed.
+        Average speaking rate is ~150 words per minute, or ~12.5 characters per second.
+
+        Args:
+            text: Text to estimate duration for
+
+        Returns:
+            Estimated duration in milliseconds
+        """
+        if not text.strip():
+            return 0.0
+
+        # Average characters per second at normal speed
+        chars_per_second = 12.5
+
+        # Adjust for speed setting
+        adjusted_chars_per_second = chars_per_second * self._config.speed
+
+        # Calculate duration
+        duration_seconds = len(text) / adjusted_chars_per_second
+
+        # Add small padding for pauses (10%)
+        duration_seconds *= 1.1
+
+        return duration_seconds * 1000  # Convert to milliseconds
+
+    def stop(self) -> None:
+        """Stop current playback immediately.
+
+        This method can be called to interrupt ongoing speech synthesis.
+        """
+        self._stop_event.set()
+        self._logger.debug("Stop signal sent to TTS")
+
+        try:
+            import sounddevice as sd
+
+            sd.stop()
+            self._logger.debug("Audio playback stopped")
+        except ImportError:
+            pass
+        except Exception as e:
+            self._logger.warning(f"Error stopping audio: {e}")
+
     def play(self, audio: np.ndarray, blocking: bool = True) -> None:
         """Play audio through the default audio device.
 
@@ -193,15 +245,47 @@ class KokoroTTS:
             ) from e
 
         try:
+            # Clear stop event before starting
+            self._stop_event.clear()
+
             self._logger.debug(
                 f"Playing audio: {len(audio)} samples at {self._config.sample_rate}Hz"
             )
 
-            # Play audio
-            sd.play(audio, self._config.sample_rate, blocking=blocking)
+            # Ensure audio is float32 and contiguous
+            if audio.dtype != np.float32:
+                audio = audio.astype(np.float32)
+            audio = np.ascontiguousarray(audio)
 
-            if blocking:
-                sd.wait()  # Wait until playback is finished
+            # Use a larger blocksize to prevent buffer underruns and popping
+            # 2048 samples at 24kHz = ~85ms blocks, which should be smooth
+            blocksize = 2048
+
+            # Create an output stream with explicit settings
+            with sd.OutputStream(
+                samplerate=self._config.sample_rate,
+                channels=1,
+                dtype="float32",
+                blocksize=blocksize,
+                latency="high",
+            ) as stream:
+                # Write audio in chunks
+                offset = 0
+                while offset < len(audio):
+                    if self._stop_event.is_set():
+                        self._logger.debug("Playback interrupted")
+                        break
+
+                    # Get next chunk
+                    chunk = audio[offset : offset + blocksize]
+
+                    # Pad last chunk if needed
+                    if len(chunk) < blocksize:
+                        chunk = np.pad(chunk, (0, blocksize - len(chunk)), mode="constant")
+
+                    # Write to stream (blocking write)
+                    stream.write(chunk)
+                    offset += blocksize
 
             self._logger.debug("Audio playback completed")
 
@@ -295,6 +379,7 @@ class KokoroTTS:
         """Clean up resources."""
         if self._initialized:
             self._logger.info("Cleaning up TTS engine")
+            self.stop()  # Stop any ongoing playback
             self._kokoro = None
             self._initialized = False
 

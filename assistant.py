@@ -30,6 +30,7 @@ Environment Variables:
 """
 
 import os
+import re
 import signal
 import sys
 import threading
@@ -43,6 +44,7 @@ from ai_assistant.shared.interfaces import IEvent
 from ai_assistant.shared.ollama import OllamaClient, OllamaError
 from ai_assistant.perception.core import PerceptionSystem, PerceptionConfig
 from ai_assistant.actions.tts import KokoroTTS, KokoroTTSConfig
+from echo_filter import EchoFilter
 
 logger = get_logger(__name__)
 
@@ -82,7 +84,8 @@ class AssistantConfig:
     system_prompt: str = (
         "You are a helpful, friendly voice assistant. "
         "Keep your responses concise and conversational since they will be spoken aloud. "
-        "Aim for 1-3 sentences unless the user asks for detailed information."
+        "Aim for 1-3 sentences unless the user asks for detailed information. "
+        "Never use emojis or special characters in your responses."
     )
 
     # TTS Configuration
@@ -184,14 +187,26 @@ class Assistant:
         self._running = False
         self._processing_lock = threading.Lock()
         self._is_speaking = False
+        self._tts_end_time: float = 0.0  # Timestamp when TTS finished
+        self._post_tts_grace_period: float = 1.5  # Seconds to ignore transcriptions after TTS ends
 
         # Conversation history
         self._history = ConversationHistory(max_turns=self._config.max_history)
+
+        # Echo filtering - uses word overlap and fuzzy matching
+        self._echo_filter = EchoFilter(
+            buffer_ms=2500,  # 2.5 second buffer after TTS ends
+            similarity_threshold=0.40,  # 40% similarity for fuzzy match (aggressive)
+            word_overlap_threshold=0.30,  # 30% of words must match (aggressive)
+            max_stored_responses=5,  # Keep last 5 responses
+        )
 
         # Components (initialized lazily)
         self._perception: Optional[PerceptionSystem] = None
         self._ollama: Optional[OllamaClient] = None
         self._tts: Optional[KokoroTTS] = None
+        self._audio_source: Optional[Any] = None
+        self._stt_processor: Optional[Any] = None  # STTProcessor, for VAD control
 
     def initialize(self) -> None:
         """Initialize all components."""
@@ -272,6 +287,20 @@ class Assistant:
         # Start perception system
         self._perception.start()
 
+        # Get reference to audio input source
+        self._audio_source = self._perception.get_input_source(self._config.audio_source_id)
+        if self._audio_source:
+            logger.info("Audio source acquired")
+        else:
+            logger.warning("Audio source not found")
+
+        # Get reference to STT processor for VAD control
+        self._stt_processor = self._perception.get_processor(self._config.stt_processor_id)
+        if self._stt_processor:
+            logger.info("STT processor acquired")
+        else:
+            logger.warning("STT processor not found")
+
         logger.info("AI Assistant started - listening for speech...")
         logger.info(f"Using model: {self._config.ollama_model}")
         logger.info(f"Using voice: {self._config.tts_voice}")
@@ -316,17 +345,38 @@ class Assistant:
         if not self._running:
             return
 
-        # Don't process while speaking (prevents echo)
-        if self._is_speaking:
-            logger.debug("Ignoring transcription while speaking")
-            return
-
         # Extract transcription data
         text = event.data.get("text", "").strip()
         confidence = event.data.get("confidence", 0.0)
 
         if not text:
             return
+
+        # BLOCK ALL transcriptions during TTS playback
+        # The VAD buffer is being filled with TTS audio, any transcription is echo
+        if self._is_speaking:
+            logger.debug(f"Blocked during TTS playback: '{text}'")
+            return
+
+        # During grace period after TTS ends, use echo filter
+        time_since_tts = time.time() - self._tts_end_time
+        is_in_grace_period = time_since_tts < self._post_tts_grace_period
+
+        if is_in_grace_period:
+            # Use echo filter - but be strict since this is likely residual echo
+            if self._echo_filter.is_echo(text):
+                logger.debug(f"Echo blocked during grace period ({time_since_tts:.2f}s): '{text}'")
+                return
+            else:
+                # Might be genuine interruption - let it through but log
+                logger.info(
+                    f"Potential user input during grace period ({time_since_tts:.2f}s): '{text}'"
+                )
+        else:
+            # Normal operation - still use echo filter as safety net
+            if self._echo_filter.is_echo(text):
+                logger.debug(f"Echo filtered: '{text}'")
+                return
 
         logger.info(f"User: {text} (confidence: {confidence:.2f})")
 
@@ -338,6 +388,10 @@ class Assistant:
             daemon=True,
         )
         thread.start()
+
+    def _on_interrupt(self) -> None:
+        """Handle user interruption during TTS playback (currently unused)."""
+        pass
 
     def _process_and_respond(self, user_text: str) -> None:
         """Process user input and generate/speak response.
@@ -402,7 +456,10 @@ class Assistant:
             # Extract response text
             message = response.get("message", {})
             if isinstance(message, dict):
-                return str(message.get("content", ""))
+                content = str(message.get("content", ""))
+                # Strip <think>...</think> tags and their content
+                content = re.sub(r"<think>.*?</think>\s*", "", content, flags=re.DOTALL)
+                return content.strip()
             return ""
 
         except OllamaError as e:
@@ -410,7 +467,7 @@ class Assistant:
             return "I'm sorry, I encountered an error processing your request."
 
     def _speak(self, text: str) -> None:
-        """Speak text using TTS.
+        """Speak text using TTS with echo filtering.
 
         Args:
             text: Text to speak
@@ -421,7 +478,18 @@ class Assistant:
 
         try:
             self._is_speaking = True
-            logger.debug(f"Speaking: {text[:50]}...")
+
+            # Reset VAD at START of TTS to clear any pending speech detection
+            # This ensures we don't have leftover audio from before TTS started
+            if self._stt_processor is not None and hasattr(self._stt_processor, "reset_vad"):
+                self._stt_processor.reset_vad()
+                logger.debug("VAD reset before TTS playback")
+
+            # Estimate duration and store response for echo filtering
+            duration_ms = self._tts.estimate_duration(text)
+            self._echo_filter.set_tts_response(text, duration_ms)
+
+            logger.debug(f"Speaking ({duration_ms:.0f}ms): {text[:50]}...")
 
             # Synthesize and play
             self._tts.speak(text)
@@ -430,6 +498,16 @@ class Assistant:
             logger.error(f"TTS error: {e}")
         finally:
             self._is_speaking = False
+            # Record when TTS ended so we can apply grace period
+            self._tts_end_time = time.time()
+
+            # Reset VAD at END of TTS to clear any buffered TTS audio
+            # This prevents the STT from transcribing the TTS output
+            if self._stt_processor is not None and hasattr(self._stt_processor, "reset_vad"):
+                self._stt_processor.reset_vad()
+                logger.debug("VAD reset after TTS playback")
+
+            logger.debug(f"TTS ended, grace period of {self._post_tts_grace_period}s started")
 
     def run_forever(self) -> None:
         """Run the assistant until interrupted."""
