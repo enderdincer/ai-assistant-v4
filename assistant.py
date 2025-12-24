@@ -49,6 +49,41 @@ from echo_filter import EchoFilter
 logger = get_logger(__name__)
 
 
+def _strip_emojis(text: str) -> str:
+    """Remove emojis and other non-ASCII special characters from text.
+
+    Keeps basic punctuation and letters that TTS can pronounce.
+
+    Args:
+        text: Input text potentially containing emojis
+
+    Returns:
+        Text with emojis removed
+    """
+    # Pattern matches most emojis and special unicode symbols
+    emoji_pattern = re.compile(
+        "["
+        "\U0001f600-\U0001f64f"  # emoticons
+        "\U0001f300-\U0001f5ff"  # symbols & pictographs
+        "\U0001f680-\U0001f6ff"  # transport & map symbols
+        "\U0001f1e0-\U0001f1ff"  # flags
+        "\U00002702-\U000027b0"  # dingbats
+        "\U000024c2-\U0001f251"  # enclosed characters
+        "\U0001f900-\U0001f9ff"  # supplemental symbols
+        "\U0001fa00-\U0001fa6f"  # chess symbols
+        "\U0001fa70-\U0001faff"  # symbols extended
+        "\U00002600-\U000026ff"  # misc symbols
+        "\U00002300-\U000023ff"  # misc technical
+        "\U0001f700-\U0001f77f"  # alchemical symbols
+        "]+",
+        flags=re.UNICODE,
+    )
+    text = emoji_pattern.sub("", text)
+    # Clean up any double spaces left behind
+    text = re.sub(r"  +", " ", text)
+    return text.strip()
+
+
 @dataclass
 class AssistantConfig:
     """Configuration for the AI Assistant.
@@ -85,7 +120,7 @@ class AssistantConfig:
         "You are a helpful, friendly voice assistant. "
         "Keep your responses concise and conversational since they will be spoken aloud. "
         "Aim for 1-3 sentences unless the user asks for detailed information. "
-        "Never use emojis or special characters in your responses."
+        "ABSOLUTELY NO EMOJIS. DO NOT USE EMOJIS AT ALL."
     )
 
     # TTS Configuration
@@ -459,6 +494,8 @@ class Assistant:
                 content = str(message.get("content", ""))
                 # Strip <think>...</think> tags and their content
                 content = re.sub(r"<think>.*?</think>\s*", "", content, flags=re.DOTALL)
+                # Strip emojis and other non-speech characters
+                content = _strip_emojis(content)
                 return content.strip()
             return ""
 
