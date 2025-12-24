@@ -34,7 +34,7 @@ vision = [
 
 # Text-to-Speech (TTS) support using Kokoro 82M model
 tts = [
-    "kokoro-onnx>=1.5.5",
+    "kokoro-onnx>=0.4.0",
     "onnxruntime>=1.20.0",
     "soundfile>=0.12.0",
     "sounddevice>=0.4.6",
