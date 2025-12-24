@@ -11,6 +11,7 @@ dependencies = [
     "opencv-python>=4.9.0",
     "numpy>=1.26.0",
     "pillow>=10.2.0",
+    "python-dotenv>=1.0.0",
 ]
 
 [project.optional-dependencies]
@@ -44,6 +45,12 @@ mqtt = [
     "paho-mqtt>=2.0.0",
 ]
 
+# Memory system (PostgreSQL + Qdrant)
+memory = [
+    "psycopg[binary,pool]>=3.1.0",
+    "qdrant-client>=1.7.0",
+]
+
 # Development tools
 dev = [
     "pytest>=8.0.0",
@@ -57,7 +64,7 @@ dev = [
 
 # All optional dependencies
 all = [
-    "ai-assistant[stt,vision,tts,mqtt,dev]",
+    "ai-assistant[stt,vision,tts,mqtt,memory,dev]",
 ]
 
 [build-system]

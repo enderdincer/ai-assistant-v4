@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 
+# Load environment variables from .env file BEFORE any other imports
+from dotenv import load_dotenv
+
+load_dotenv()
+
 import os
 import re
 import signal
@@ -16,6 +21,15 @@ from ai_assistant.shared.ollama import OllamaClient, OllamaError
 from ai_assistant.perception.core import PerceptionSystem, PerceptionConfig
 from ai_assistant.actions.tts import KokoroTTS, KokoroTTSConfig
 from echo_filter import EchoFilter
+
+try:
+    from ai_assistant.memory import MemoryManager, MemoryError
+
+    MEMORY_AVAILABLE = True
+except ImportError:
+    MEMORY_AVAILABLE = False
+    MemoryManager = None  # type: ignore
+    MemoryError = Exception  # type: ignore
 
 logger = get_logger(__name__)
 
@@ -79,6 +93,9 @@ class AssistantConfig:
     audio_source_id: str = "microphone"
     stt_processor_id: str = "stt"
     max_history: int = field(default_factory=lambda: int(os.getenv("MAX_HISTORY", "10")))
+    memory_enabled: bool = field(
+        default_factory=lambda: os.getenv("MEMORY_ENABLED", "").lower() in ("1", "true", "yes")
+    )
     log_level: LogLevel = field(
         default_factory=lambda: LogLevel.DEBUG
         if os.getenv("DEBUG", "").lower() in ("1", "true", "yes")
@@ -142,6 +159,9 @@ class Assistant:
         self._audio_source: Optional[Any] = None
         self._stt_processor: Optional[Any] = None
 
+        self._memory: Optional[Any] = None
+        self._session_id: Optional[str] = None
+
     def initialize(self) -> None:
         logger.info("Initializing components...")
 
@@ -190,6 +210,20 @@ class Assistant:
         perception_config.log_level = self._config.log_level
         self._perception = PerceptionSystem(perception_config)
 
+        if self._config.memory_enabled and MEMORY_AVAILABLE:
+            try:
+                self._memory = MemoryManager()
+                self._memory.initialize()
+                self._session_id = self._memory.create_session()
+                logger.info(f"Memory system initialized, session: {self._session_id[:8]}...")
+            except MemoryError as e:
+                logger.warning(f"Memory system initialization failed: {e}")
+                self._memory = None
+        elif self._config.memory_enabled and not MEMORY_AVAILABLE:
+            logger.warning(
+                "Memory enabled but dependencies not installed. Run: pip install 'ai-assistant[memory]'"
+            )
+
         logger.info("All components initialized")
 
     def start(self) -> None:
@@ -237,6 +271,10 @@ class Assistant:
 
         if self._ollama:
             self._ollama.close()
+
+        if self._memory:
+            self._memory.close()
+            self._memory = None
 
         logger.info("AI Assistant stopped")
 
@@ -290,6 +328,17 @@ class Assistant:
 
             try:
                 self._history.add_user_message(user_text)
+
+                if self._memory and self._session_id:
+                    try:
+                        self._memory.log_conversation(
+                            session_id=self._session_id,
+                            role="user",
+                            content=user_text,
+                        )
+                    except Exception as e:
+                        logger.debug(f"Failed to log user message to memory: {e}")
+
                 response_text = self._generate_response(user_text)
 
                 if not response_text:
@@ -298,6 +347,17 @@ class Assistant:
 
                 logger.info(f"Assistant: {response_text}")
                 self._history.add_assistant_message(response_text)
+
+                if self._memory and self._session_id:
+                    try:
+                        self._memory.log_conversation(
+                            session_id=self._session_id,
+                            role="assistant",
+                            content=response_text,
+                        )
+                    except Exception as e:
+                        logger.debug(f"Failed to log assistant message to memory: {e}")
+
                 self._speak(response_text)
 
             except Exception as e:
@@ -307,7 +367,26 @@ class Assistant:
         if self._ollama is None:
             raise RuntimeError("Ollama client not initialized")
 
-        messages = [{"role": "system", "content": self._config.system_prompt}]
+        system_prompt = self._config.system_prompt
+
+        if self._memory and self._session_id:
+            try:
+                context = self._memory.get_context_for_query(
+                    query=user_text,
+                    session_id=self._session_id,
+                    max_facts=5,
+                    max_similar=3,
+                )
+                if not context.is_empty():
+                    context_addition = context.to_system_prompt_addition()
+                    system_prompt = f"{system_prompt}\n\n{context_addition}"
+                    logger.debug(
+                        f"Added memory context: {len(context.relevant_facts)} facts, {len(context.similar_conversations)} similar"
+                    )
+            except Exception as e:
+                logger.debug(f"Failed to retrieve memory context: {e}")
+
+        messages = [{"role": "system", "content": system_prompt}]
         messages.extend(self._history.get_messages())
 
         try:
