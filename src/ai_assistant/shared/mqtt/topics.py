@@ -16,6 +16,7 @@ Topic Structure:
     │   └── speaker-activity          # TTS start/end notifications
     ├── actions/                      # Action requests for actuators
     │   ├── speech                    # TTS requests (voice, text)
+    │   ├── speech-control            # TTS control (skip, pause, clear)
     │   ├── display                   # Display/UI actions
     │   └── notification              # Notification actions
     ├── memory/                       # Memory service communication
@@ -166,6 +167,13 @@ class Topics:
         category=TopicCategory.ACTIONS,
         name="speech",
         description="Text-to-speech requests",
+        event_type=None,
+    )
+
+    ACTION_SPEECH_CONTROL = TopicDefinition(
+        category=TopicCategory.ACTIONS,
+        name="speech-control",
+        description="Speech playback control (skip, pause, clear queue)",
         event_type=None,
     )
 

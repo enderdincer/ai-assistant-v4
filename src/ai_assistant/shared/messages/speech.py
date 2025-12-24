@@ -14,6 +14,16 @@ class SpeakerState(str, Enum):
     SPEAKING_ENDED = "speaking_ended"
 
 
+class SpeechControlAction(str, Enum):
+    """Speech control actions."""
+
+    SKIP_CURRENT = "skip_current"  # Stop current speech, play next in queue
+    SKIP_ALL = "skip_all"  # Stop current speech and clear queue
+    CLEAR_QUEUE = "clear_queue"  # Clear queue but don't stop current
+    PAUSE = "pause"  # Pause playback (future)
+    RESUME = "resume"  # Resume playback (future)
+
+
 @dataclass
 class SpeechRequestMessage(BaseMessage):
     """Message requesting text-to-speech synthesis and playback.
@@ -171,5 +181,65 @@ class SpeakerActivityMessage(BaseMessage):
             state=state,
             text=data.get("text", ""),
             duration_ms=data.get("duration_ms", 0.0),
+            request_id=data.get("request_id", ""),
+        )
+
+
+@dataclass
+class SpeechControlMessage(BaseMessage):
+    """Message for controlling speech playback.
+
+    Published to: all/actions/speech-control
+
+    Allows clients to skip, pause, or clear the speech queue.
+
+    Attributes:
+        action: Control action to perform
+        request_id: Optional specific request ID to target
+    """
+
+    action: SpeechControlAction = SpeechControlAction.SKIP_CURRENT
+    request_id: str = ""  # Optional: target specific request
+
+    def _to_dict(self) -> dict[str, Any]:
+        """Convert to dict with enum serialization."""
+        data = super()._to_dict()
+        data["action"] = self.action.value
+        return data
+
+    @classmethod
+    def create(
+        cls,
+        action: SpeechControlAction,
+        request_id: str = "",
+        source: str = "",
+    ) -> "SpeechControlMessage":
+        """Create a speech control message.
+
+        Args:
+            action: Control action to perform
+            request_id: Optional specific request ID to target
+            source: Source service name
+
+        Returns:
+            SpeechControlMessage instance
+        """
+        return cls(
+            action=action,
+            request_id=request_id,
+            source=source,
+        )
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "SpeechControlMessage":
+        """Create from dictionary."""
+        action_str = data.get("action", "skip_current")
+        action = SpeechControlAction(action_str) if isinstance(action_str, str) else action_str
+
+        return cls(
+            message_id=data.get("message_id", ""),
+            timestamp=data.get("timestamp", 0.0),
+            source=data.get("source", ""),
+            action=action,
             request_id=data.get("request_id", ""),
         )
