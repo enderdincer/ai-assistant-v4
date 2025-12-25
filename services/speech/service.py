@@ -272,9 +272,12 @@ class SpeechService(BaseService):
 
             # Synthesize and play
             voice = message.voice or self._speech_config.default_voice
-            self._logger.debug(f"Synthesizing with voice '{voice}': {message.text[:50]}...")
+            speed = message.speed if message.speed > 0 else self._speech_config.default_speed
+            self._logger.debug(
+                f"Synthesizing with voice '{voice}' at speed {speed}: {message.text[:50]}..."
+            )
 
-            self._tts.speak(message.text, voice=voice)
+            self._tts.speak(message.text, voice=voice, speed=speed)
 
             actual_duration_ms = (time.time() - start_time) * 1000
 

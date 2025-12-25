@@ -136,12 +136,45 @@ class KokoroTTS:
             self._logger.error(f"Failed to initialize TTS engine: {e}")
             raise RuntimeError(f"TTS initialization failed: {e}") from e
 
-    def synthesize(self, text: str, voice: Optional[str] = None) -> np.ndarray:
+    def _clean_text(self, text: str) -> str:
+        """Clean text for speech synthesis.
+
+        Removes characters that shouldn't be spoken aloud, such as:
+        - Asterisks (often used for emphasis in markdown)
+        - Other formatting characters
+
+        Args:
+            text: Raw text to clean
+
+        Returns:
+            Cleaned text suitable for TTS
+        """
+        import re
+
+        # Remove asterisks (markdown bold/italic)
+        cleaned = text.replace("*", "")
+
+        # Remove underscores used for emphasis (but keep those in words like snake_case)
+        # Only remove when used as markdown emphasis: _word_ or __word__
+        cleaned = re.sub(r"(?<!\w)_+|_+(?!\w)", "", cleaned)
+
+        # Remove backticks (code formatting)
+        cleaned = cleaned.replace("`", "")
+
+        # Collapse multiple spaces into one
+        cleaned = re.sub(r"\s+", " ", cleaned)
+
+        return cleaned.strip()
+
+    def synthesize(
+        self, text: str, voice: Optional[str] = None, speed: Optional[float] = None
+    ) -> np.ndarray:
         """Synthesize speech from text.
 
         Args:
             text: Text to synthesize
             voice: Voice name to use (None = use config default)
+            speed: Speech speed multiplier (None = use config default)
 
         Returns:
             np.ndarray: Audio samples as float32 array
@@ -153,20 +186,26 @@ class KokoroTTS:
         if not self._initialized or self._kokoro is None:
             raise RuntimeError("TTS engine is not initialized. Call initialize() first.")
 
-        if not text.strip():
+        # Clean the text before synthesis
+        cleaned_text = self._clean_text(text)
+
+        if not cleaned_text.strip():
             self._logger.warning("Empty text provided, returning silence")
             return np.array([], dtype=np.float32)
 
         voice_name = voice or self._config.voice
+        speed_value = speed if speed is not None else self._config.speed
 
         try:
-            self._logger.debug(f"Synthesizing with voice '{voice_name}': {text[:50]}...")
+            self._logger.debug(
+                f"Synthesizing with voice '{voice_name}' at speed {speed_value}: {cleaned_text[:50]}..."
+            )
 
             # Generate speech using Kokoro
             audio, _ = self._kokoro.create(
-                text,
+                cleaned_text,
                 voice=voice_name,
-                speed=self._config.speed,
+                speed=speed_value,
                 lang=self._config.lang,
             )
 
@@ -294,7 +333,11 @@ class KokoroTTS:
             raise RuntimeError(f"Audio playback failed: {e}") from e
 
     def speak(
-        self, text: str, voice: Optional[str] = None, save_to: Optional[Union[str, Path]] = None
+        self,
+        text: str,
+        voice: Optional[str] = None,
+        speed: Optional[float] = None,
+        save_to: Optional[Union[str, Path]] = None,
     ) -> np.ndarray:
         """Synthesize and play speech from text (convenience method).
 
@@ -303,6 +346,7 @@ class KokoroTTS:
         Args:
             text: Text to speak
             voice: Voice name to use (None = use config default)
+            speed: Speech speed multiplier (None = use config default)
             save_to: Optional path to save audio file
 
         Returns:
@@ -312,7 +356,7 @@ class KokoroTTS:
             RuntimeError: If synthesis or playback fails
         """
         # Synthesize
-        audio = self.synthesize(text, voice=voice)
+        audio = self.synthesize(text, voice=voice, speed=speed)
 
         # Save if requested
         if save_to:
