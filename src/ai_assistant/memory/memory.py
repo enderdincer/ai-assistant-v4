@@ -295,6 +295,90 @@ Summary:"""
             return self.compact_session(session_id)
         return None
 
+    # =========================================================================
+    # Session Management
+    # =========================================================================
+
+    def list_sessions(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """List all sessions with pagination.
+
+        Args:
+            limit: Maximum number of sessions to return
+            offset: Offset for pagination
+
+        Returns:
+            Tuple of (sessions list, total count)
+        """
+        sessions = self.conversations.list_sessions(limit=limit, offset=offset)
+        total = self.conversations.get_total_session_count()
+        return sessions, total
+
+    def get_session_info(self, session_id: str) -> Optional[dict[str, Any]]:
+        """Get information about a specific session.
+
+        Args:
+            session_id: Session ID to look up
+
+        Returns:
+            Session info dict or None if not found
+        """
+        summary = self.conversations.get_session_summary(session_id)
+        if summary.get("message_count", 0) == 0:
+            # Check if there are any messages at all
+            messages = self.conversations.get_session(session_id)
+            if not messages:
+                return None
+        return summary
+
+    def delete_session(self, session_id: str) -> int:
+        """Delete a session and all its messages.
+
+        Args:
+            session_id: Session ID to delete
+
+        Returns:
+            Number of messages deleted
+        """
+        return self.conversations.delete_session(session_id)
+
+    def clear_session(self, session_id: str) -> int:
+        """Clear all messages in a session.
+
+        Args:
+            session_id: Session ID to clear
+
+        Returns:
+            Number of messages cleared
+        """
+        return self.conversations.clear_session_messages(session_id)
+
+    def get_session_messages(
+        self,
+        session_id: str,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple[list[Message], int]:
+        """Get messages for a session with pagination.
+
+        Args:
+            session_id: Session ID
+            limit: Maximum number of messages to return
+            offset: Offset for pagination
+
+        Returns:
+            Tuple of (messages list, total count)
+        """
+        all_messages = self.conversations.get_session(session_id)
+        total = len(all_messages)
+
+        # Apply pagination
+        paginated = all_messages[offset : offset + limit]
+        return paginated, total
+
     def __enter__(self) -> "MemoryManager":
         self.initialize()
         return self

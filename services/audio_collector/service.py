@@ -6,6 +6,7 @@ to MQTT for processing by other services (e.g., transcription).
 
 import os
 import queue
+import socket
 import threading
 import time
 from dataclasses import dataclass, field
@@ -43,7 +44,7 @@ class AudioCollectorConfig(ServiceConfig):
         """Create configuration from environment variables."""
         return cls(
             service_name="audio-collector",
-            machine_id=os.getenv("MACHINE_ID", ""),
+            machine_id=os.getenv("MACHINE_ID", socket.gethostname()),
             sample_rate=int(os.getenv("AUDIO_SAMPLE_RATE", "16000")),
             chunk_size=int(os.getenv("AUDIO_CHUNK_SIZE", "1024")),
             channels=int(os.getenv("AUDIO_CHANNELS", "1")),

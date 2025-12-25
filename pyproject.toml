@@ -51,6 +51,12 @@ memory = [
     "qdrant-client>=1.7.0",
 ]
 
+# HTTP API support (FastAPI)
+api = [
+    "fastapi>=0.109.0",
+    "uvicorn[standard]>=0.27.0",
+]
+
 # Development tools
 dev = [
     "pytest>=8.0.0",
@@ -64,7 +70,7 @@ dev = [
 
 # All optional dependencies
 all = [
-    "ai-assistant[stt,vision,tts,mqtt,memory,dev]",
+    "ai-assistant[stt,vision,tts,mqtt,memory,api,dev]",
 ]
 
 [build-system]

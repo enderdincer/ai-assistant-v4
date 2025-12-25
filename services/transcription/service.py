@@ -2,6 +2,7 @@
 
 Listens for raw audio on MQTT and produces transcriptions.
 Supports multiple audio sources with per-source VAD state.
+Tracks the current session and includes session_id in transcriptions.
 """
 
 import os
@@ -18,6 +19,7 @@ from ai_assistant.shared.messages import (
     AudioSampleMessage,
     TranscriptionMessage,
     SpeakerActivityMessage,
+    SessionChangedMessage,
 )
 from ai_assistant.shared.messages.speech import SpeakerState
 from ai_assistant.shared.mqtt.topics import Topics, extract_machine_id
@@ -42,6 +44,8 @@ class TranscriptionServiceConfig(ServiceConfig):
         vad_min_silence: Silence duration to end speech
         vad_min_speech: Minimum speech duration
         vad_max_speech: Maximum speech before forced split
+        default_session_id: Default session ID when memory service unavailable
+        memory_service_url: URL for memory service HTTP API
     """
 
     model_name: str = "csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2"
@@ -51,6 +55,9 @@ class TranscriptionServiceConfig(ServiceConfig):
     vad_min_silence: float = 0.3
     vad_min_speech: float = 0.15
     vad_max_speech: float = 45.0
+    # Default session ID - must be a valid UUID for PostgreSQL
+    default_session_id: str = "00000000-0000-0000-0000-000000000000"
+    memory_service_url: str = "http://localhost:8080"
 
     @classmethod
     def from_env(cls) -> "TranscriptionServiceConfig":
@@ -67,6 +74,11 @@ class TranscriptionServiceConfig(ServiceConfig):
             vad_min_silence=float(os.getenv("VAD_MIN_SILENCE", "0.3")),
             vad_min_speech=float(os.getenv("VAD_MIN_SPEECH", "0.15")),
             vad_max_speech=float(os.getenv("VAD_MAX_SPEECH", "45.0")),
+            # Default session ID - must be a valid UUID for PostgreSQL
+            default_session_id=os.getenv(
+                "DEFAULT_SESSION_ID", "00000000-0000-0000-0000-000000000000"
+            ),
+            memory_service_url=os.getenv("MEMORY_SERVICE_URL", "http://localhost:8080"),
             log_level=LogLevel.DEBUG
             if os.getenv("DEBUG", "").lower() in ("1", "true", "yes")
             else LogLevel.INFO,
@@ -105,6 +117,7 @@ class TranscriptionService(BaseService):
     3. Performs STT when speech ends
     4. Publishes transcriptions to all/events/audio-transcribed
     5. Listens to speaker activity to pause during TTS
+    6. Tracks the current session and includes session_id in transcriptions
     """
 
     def __init__(self, config: TranscriptionServiceConfig) -> None:
@@ -126,21 +139,34 @@ class TranscriptionService(BaseService):
         # Global mute during TTS
         self._global_mute = False
 
+        # Session management
+        self._current_session: str = config.default_session_id
+        self._session_lock = threading.Lock()
+
         # Topics
         self._audio_pattern = Topics.RAW_AUDIO.subscription_pattern
         self._transcription_topic = Topics.EVENT_AUDIO_TRANSCRIBED.topic
         self._speaker_activity_topic = Topics.EVENT_SPEAKER_ACTIVITY.topic
+        self._session_changed_topic = Topics.EVENT_SESSION_CHANGED.topic
 
     def _setup(self) -> None:
         """Set up STT model and subscribe to audio."""
         # Load STT model
         self._load_stt_model()
 
+        # Query memory service for current session
+        self._fetch_current_session()
+
         # Subscribe to audio streams
         self._subscribe(self._audio_pattern, self._on_audio)
 
         # Subscribe to speaker activity for muting
         self._subscribe(self._speaker_activity_topic, self._on_speaker_activity)
+
+        # Subscribe to session changes
+        self._subscribe(self._session_changed_topic, self._on_session_changed)
+
+        self._logger.info(f"Using session: {self._current_session}")
 
     def _load_stt_model(self) -> None:
         """Load the STT model."""
@@ -324,7 +350,11 @@ class TranscriptionService(BaseService):
                 text = self._transcribe(speech_audio)
 
                 if text and text.strip():
-                    # Publish transcription
+                    # Get current session
+                    with self._session_lock:
+                        session_id = self._current_session
+
+                    # Publish transcription with session_id
                     trans_msg = TranscriptionMessage.create(
                         text=text.strip(),
                         audio_source=source_id,
@@ -332,10 +362,13 @@ class TranscriptionService(BaseService):
                         confidence=1.0,
                         audio_duration=audio_duration,
                         model_name=self._trans_config.model_name,
+                        session_id=session_id,
                     )
 
                     self._publish(self._transcription_topic, trans_msg.to_bytes())
-                    self._logger.info(f"Transcription from {source_id}: '{text.strip()}'")
+                    self._logger.info(
+                        f"Transcription from {source_id} (session={session_id}): '{text.strip()}'"
+                    )
 
         except Exception as e:
             self._logger.error(f"Error processing audio: {e}", exc_info=True)
@@ -362,3 +395,57 @@ class TranscriptionService(BaseService):
         except Exception as e:
             self._logger.error(f"Transcription failed: {e}")
             return None
+
+    # =========================================================================
+    # Session Management
+    # =========================================================================
+
+    def _fetch_current_session(self) -> None:
+        """Fetch the current session from memory service on startup."""
+        try:
+            import urllib.request
+            import json
+
+            url = f"{self._trans_config.memory_service_url}/sessions/current"
+            self._logger.debug(f"Fetching current session from {url}")
+
+            req = urllib.request.Request(url, method="GET")
+            req.add_header("Accept", "application/json")
+
+            with urllib.request.urlopen(req, timeout=5.0) as response:
+                data = json.loads(response.read().decode("utf-8"))
+                session_id = data.get("session_id")
+
+                if session_id:
+                    with self._session_lock:
+                        self._current_session = session_id
+                    self._logger.info(f"Got current session from memory: {session_id}")
+
+        except Exception as e:
+            self._logger.warning(
+                f"Could not fetch session from memory service: {e}. "
+                f"Using default: {self._trans_config.default_session_id}"
+            )
+
+    def _on_session_changed(self, topic: str, payload: bytes) -> None:
+        """Handle session change events from memory service.
+
+        Args:
+            topic: MQTT topic
+            payload: Message payload
+        """
+        try:
+            message = SessionChangedMessage.from_bytes(payload)
+            new_session = message.session_id
+
+            if not new_session:
+                return
+
+            with self._session_lock:
+                old_session = self._current_session
+                if new_session != old_session:
+                    self._current_session = new_session
+                    self._logger.info(f"Session changed: {old_session} -> {new_session}")
+
+        except Exception as e:
+            self._logger.error(f"Error handling session change: {e}")

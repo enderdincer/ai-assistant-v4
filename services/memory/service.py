@@ -5,11 +5,13 @@ Provides persistent memory storage and retrieval:
 2. Handles memory query requests and returns context
 3. Stores facts from extraction service
 4. Auto-compacts long conversations
+5. Manages sessions and provides HTTP API for session CRUD
 """
 
 import os
 import threading
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Optional
 
 from ai_assistant.shared.logging import get_logger, LogLevel
@@ -21,6 +23,7 @@ from ai_assistant.shared.messages import (
     MemoryResponseMessage,
     MemoryStoreMessage,
     FactMessage,
+    SessionChangedMessage,
 )
 from ai_assistant.shared.mqtt.topics import Topics
 from ai_assistant.memory import MemoryManager, MemoryConfig, Fact
@@ -38,6 +41,8 @@ class MemoryServiceConfig(ServiceConfig):
         auto_log_conversations: Whether to auto-log transcriptions/responses
         auto_compact: Whether to auto-compact long conversations
         default_session_id: Default session ID for voice transcriptions
+        http_port: Port for the HTTP API server
+        http_host: Host to bind the HTTP server to
     """
 
     # Database connection settings (matching MemoryConfig structure)
@@ -57,7 +62,12 @@ class MemoryServiceConfig(ServiceConfig):
     # Service-specific settings
     auto_log_conversations: bool = True
     auto_compact: bool = True
-    default_session_id: str = "default"
+    # Default session ID - must be a valid UUID for PostgreSQL
+    default_session_id: str = "00000000-0000-0000-0000-000000000000"
+
+    # HTTP API settings
+    http_port: int = 8080
+    http_host: str = "0.0.0.0"
 
     @classmethod
     def from_env(cls) -> "MemoryServiceConfig":
@@ -79,7 +89,12 @@ class MemoryServiceConfig(ServiceConfig):
             auto_log_conversations=os.getenv("AUTO_LOG_CONVERSATIONS", "true").lower()
             in ("1", "true", "yes"),
             auto_compact=os.getenv("AUTO_COMPACT", "true").lower() in ("1", "true", "yes"),
-            default_session_id=os.getenv("DEFAULT_SESSION_ID", "default"),
+            # Default session ID - must be a valid UUID for PostgreSQL
+            default_session_id=os.getenv(
+                "DEFAULT_SESSION_ID", "00000000-0000-0000-0000-000000000000"
+            ),
+            http_port=int(os.getenv("HTTP_PORT", "8080")),
+            http_host=os.getenv("HTTP_HOST", "0.0.0.0"),
             log_level=LogLevel.DEBUG
             if os.getenv("DEBUG", "").lower() in ("1", "true", "yes")
             else LogLevel.INFO,
@@ -111,6 +126,8 @@ class MemoryService(BaseService):
     2. Auto-logs conversations to the memory store
     3. Handles memory queries and returns relevant context
     4. Stores facts received from extraction service
+    5. Manages sessions and provides HTTP API for session CRUD
+    6. Publishes session change events for other services
     """
 
     def __init__(self, config: MemoryServiceConfig) -> None:
@@ -128,6 +145,14 @@ class MemoryService(BaseService):
         # Processing lock
         self._processing_lock = threading.Lock()
 
+        # Session management
+        self._current_session: str = config.default_session_id
+        self._session_lock = threading.Lock()
+
+        # HTTP server
+        self._http_server: Optional[Any] = None
+        self._http_thread: Optional[threading.Thread] = None
+
         # Topics
         self._transcription_topic = Topics.EVENT_AUDIO_TRANSCRIBED.topic
         self._response_topic = Topics.EVENT_ASSISTANT_RESPONSE.topic
@@ -135,9 +160,10 @@ class MemoryService(BaseService):
         self._query_response_topic = Topics.MEMORY_RESPONSE.topic
         self._store_topic = Topics.MEMORY_STORE.topic
         self._facts_topic = Topics.MEMORY_FACTS.topic
+        self._session_changed_topic = Topics.EVENT_SESSION_CHANGED.topic
 
     def _setup(self) -> None:
-        """Initialize memory manager and subscribe to topics."""
+        """Initialize memory manager, HTTP server, and subscribe to topics."""
         # Initialize memory manager
         memory_config = self._memory_config.to_memory_config()
         self._memory = MemoryManager(memory_config)
@@ -148,6 +174,9 @@ class MemoryService(BaseService):
         except Exception as e:
             self._logger.error(f"Failed to initialize memory: {e}")
             raise
+
+        # Start HTTP API server
+        self._start_http_server()
 
         # Subscribe to topics
         self._subscribe(self._query_topic, self._on_query)
@@ -160,10 +189,16 @@ class MemoryService(BaseService):
             self._subscribe(self._response_topic, self._on_response)
             self._logger.info("Auto-logging enabled for conversations")
 
-        self._logger.info("Memory service ready")
+        self._logger.info(
+            f"Memory service ready (session: {self._current_session}, "
+            f"http: {self._memory_config.http_host}:{self._memory_config.http_port})"
+        )
 
     def _cleanup(self) -> None:
-        """Clean up memory manager."""
+        """Clean up memory manager and HTTP server."""
+        # Stop HTTP server
+        self._stop_http_server()
+
         if self._memory:
             self._memory.close()
             self._memory = None
@@ -184,8 +219,8 @@ class MemoryService(BaseService):
             if not text:
                 return
 
-            # Use session from metadata or default
-            session_id = self._memory_config.default_session_id
+            # Use session from message, or fall back to current active session
+            session_id = message.session_id or self._get_current_session()
 
             # Log as user message
             self._log_message(
@@ -439,3 +474,135 @@ class MemoryService(BaseService):
             else None,
             "metadata": getattr(message, "metadata", {}),
         }
+
+    # =========================================================================
+    # Session Management
+    # =========================================================================
+
+    def _get_current_session(self) -> str:
+        """Get the current active session ID (thread-safe).
+
+        Returns:
+            Current session ID
+        """
+        with self._session_lock:
+            return self._current_session
+
+    def _set_current_session(self, session_id: str) -> None:
+        """Set the current active session ID and publish event (thread-safe).
+
+        This is idempotent - always publishes the current session state
+        so subscribers can stay synchronized.
+
+        Args:
+            session_id: New session ID
+        """
+        with self._session_lock:
+            old_session = self._current_session
+            self._current_session = session_id
+
+        # Always publish current session state (idempotent)
+        self._publish_current_session(session_id, old_session)
+
+    def _publish_current_session(self, session_id: str, previous_session_id: str) -> None:
+        """Publish current session state to MQTT.
+
+        Args:
+            session_id: The current active session ID
+            previous_session_id: The previous session ID (for informational purposes)
+        """
+        try:
+            # Get session info for the message
+            message_count = 0
+            created_at = ""
+
+            if self._memory:
+                info = self._memory.get_session_info(session_id)
+                if info:
+                    message_count = info.get("message_count", 0)
+                    created_at = info.get("first_message_at", "")
+
+            # Create and publish the message
+            message = SessionChangedMessage.create(
+                session_id=session_id,
+                previous_session_id=previous_session_id,
+                message_count=message_count,
+                created_at=created_at or datetime.utcnow().isoformat(),
+            )
+
+            self._publish(self._session_changed_topic, message.to_bytes())
+
+            if session_id != previous_session_id:
+                self._logger.info(f"Session changed: {previous_session_id} -> {session_id}")
+            else:
+                self._logger.debug(f"Published current session: {session_id}")
+
+        except Exception as e:
+            self._logger.error(f"Error publishing current session: {e}")
+
+    # =========================================================================
+    # HTTP Server
+    # =========================================================================
+
+    def _start_http_server(self) -> None:
+        """Start the HTTP API server in a background thread."""
+        try:
+            # Import here to avoid requiring FastAPI when not using HTTP
+            import uvicorn
+            from services.memory.api import create_api
+
+            if self._memory is None:
+                self._logger.error("Cannot start HTTP server: memory not initialized")
+                return
+
+            # Create the FastAPI app with callbacks
+            app = create_api(
+                memory=self._memory,
+                get_current_session=self._get_current_session,
+                set_current_session=self._set_current_session,
+            )
+
+            # Configure uvicorn
+            config = uvicorn.Config(
+                app=app,
+                host=self._memory_config.http_host,
+                port=self._memory_config.http_port,
+                log_level="warning",
+                access_log=False,
+            )
+            self._http_server = uvicorn.Server(config)
+
+            # Start in background thread
+            self._http_thread = threading.Thread(
+                target=self._http_server.run,
+                name="memory-http-server",
+                daemon=True,
+            )
+            self._http_thread.start()
+
+            self._logger.info(
+                f"HTTP API server started on "
+                f"{self._memory_config.http_host}:{self._memory_config.http_port}"
+            )
+
+        except ImportError as e:
+            self._logger.warning(f"HTTP API not available (install with 'pip install .[api]'): {e}")
+        except Exception as e:
+            self._logger.error(f"Failed to start HTTP server: {e}")
+
+    def _stop_http_server(self) -> None:
+        """Stop the HTTP API server."""
+        if self._http_server:
+            try:
+                self._http_server.should_exit = True
+
+                # Wait for thread to finish
+                if self._http_thread and self._http_thread.is_alive():
+                    self._http_thread.join(timeout=5.0)
+
+                self._logger.info("HTTP API server stopped")
+            except Exception as e:
+                self._logger.error(f"Error stopping HTTP server: {e}")
+            finally:
+                self._http_server = None
+                self._http_thread = None

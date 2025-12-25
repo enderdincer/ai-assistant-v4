@@ -95,7 +95,7 @@ class AssistantServiceConfig(ServiceConfig):
                 "Keep your responses concise unless the user asks for detailed information. "
                 "Never use emojis.",
             ),
-            tts_voice=os.getenv("TTS_VOICE", "af_bella"),
+            tts_voice=os.getenv("TTS_VOICE", "bf_emma"),
             tts_speed=float(os.getenv("TTS_SPEED", "1.0")),
             max_history=int(os.getenv("MAX_HISTORY", "10")),
             enable_tts=os.getenv("ENABLE_TTS", "true").lower() in ("1", "true", "yes"),
@@ -278,7 +278,10 @@ class AssistantService(BaseService):
                     return
 
             self._logger.info(f"User (voice from {message.audio_source}): {text}")
-            self._process_input(text, source="voice")
+
+            # Use session_id from transcription message
+            session_id = message.session_id or ""
+            self._process_input(text, source="voice", session_id=session_id)
 
         except Exception as e:
             self._logger.error(f"Error handling transcription: {e}")

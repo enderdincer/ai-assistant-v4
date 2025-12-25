@@ -13,7 +13,8 @@ Topic Structure:
     │   ├── vision-described          # Vision model descriptions
     │   ├── text-input                # User text input
     │   ├── assistant-response        # Assistant text responses
-    │   └── speaker-activity          # TTS start/end notifications
+    │   ├── speaker-activity          # TTS start/end notifications
+    │   └── current-session           # Current active session info
     ├── actions/                      # Action requests for actuators
     │   ├── speech                    # TTS requests (voice, text)
     │   ├── speech-control            # TTS control (skip, pause, clear)
@@ -159,6 +160,13 @@ class Topics:
         event_type="speaker.activity",
     )
 
+    EVENT_SESSION_CHANGED = TopicDefinition(
+        category=TopicCategory.EVENTS,
+        name="current-session",
+        description="Current active session information",
+        event_type="session.current",
+    )
+
     # =========================================================================
     # Action topics
     # =========================================================================
@@ -261,6 +269,7 @@ EVENT_TYPE_TO_TOPIC: dict[str, str] = {
     "vision.description": Topics.EVENT_VISION_DESCRIBED.topic,
     "assistant.response": Topics.EVENT_ASSISTANT_RESPONSE.topic,
     "speaker.activity": Topics.EVENT_SPEAKER_ACTIVITY.topic,
+    "session.current": Topics.EVENT_SESSION_CHANGED.topic,
 }
 
 # Mapping from MQTT topics to internal event types

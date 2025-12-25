@@ -18,6 +18,10 @@ from ai_assistant.shared.messages.memory import (
     MemoryStoreMessage,
     FactMessage,
 )
+from ai_assistant.shared.messages.session import (
+    SessionChangedMessage,
+    CurrentSessionMessage,
+)
 from ai_assistant.shared.messages.base import BaseMessage
 
 __all__ = [
@@ -34,4 +38,6 @@ __all__ = [
     "MemoryResponseMessage",
     "MemoryStoreMessage",
     "FactMessage",
+    "SessionChangedMessage",
+    "CurrentSessionMessage",
 ]

@@ -275,3 +275,99 @@ class ConversationStore:
             last_timestamp=row[7],
             created_at=row[8],
         )
+
+    def delete_session(self, session_id: str) -> int:
+        """Delete all messages and summaries for a session.
+
+        Args:
+            session_id: Session ID to delete
+
+        Returns:
+            Number of messages deleted
+        """
+        # Get all message IDs for this session
+        messages = self.get_session(session_id)
+        message_ids = [m.id for m in messages]
+
+        # Delete messages from both PostgreSQL and Qdrant
+        deleted_count = self.delete_messages(message_ids)
+
+        # Delete summaries
+        self._postgres.execute_returning(
+            "DELETE FROM conversation_summaries WHERE session_id = %s RETURNING id",
+            (session_id,),
+        )
+
+        # Delete summary vectors from Qdrant
+        summaries = self.get_session_summaries(session_id)
+        for summary in summaries:
+            try:
+                self._qdrant.delete(QdrantClient.COLLECTION_CONVERSATIONS, f"summary_{summary.id}")
+            except Exception:
+                pass
+
+        return deleted_count
+
+    def list_sessions(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """List all sessions with summary information.
+
+        Args:
+            limit: Maximum number of sessions to return
+            offset: Offset for pagination
+
+        Returns:
+            List of session summary dictionaries
+        """
+        query = """
+            SELECT 
+                session_id,
+                COUNT(*) as message_count,
+                MIN(timestamp) as first_message,
+                MAX(timestamp) as last_message
+            FROM messages
+            GROUP BY session_id
+            ORDER BY MAX(timestamp) DESC
+            LIMIT %s OFFSET %s
+        """
+        rows = self._postgres.fetch_all(query, (limit, offset))
+
+        sessions = []
+        for row in rows:
+            sessions.append(
+                {
+                    "session_id": str(row[0]),
+                    "message_count": int(row[1]),
+                    "first_message": row[2].isoformat() if row[2] else None,
+                    "last_message": row[3].isoformat() if row[3] else None,
+                }
+            )
+
+        return sessions
+
+    def get_total_session_count(self) -> int:
+        """Get total number of unique sessions.
+
+        Returns:
+            Total session count
+        """
+        query = "SELECT COUNT(DISTINCT session_id) FROM messages"
+        result = self._postgres.fetch_one(query, ())
+        return int(result[0]) if result else 0
+
+    def clear_session_messages(self, session_id: str) -> int:
+        """Clear all messages in a session but keep the session available.
+
+        This differs from delete_session in that it just clears messages
+        but the session_id remains valid for new messages.
+
+        Args:
+            session_id: Session ID to clear
+
+        Returns:
+            Number of messages cleared
+        """
+        return self.delete_session(session_id)
