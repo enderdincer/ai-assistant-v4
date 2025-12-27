@@ -139,7 +139,8 @@ class PostgresClient:
             with self.connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(query, params)
-                    return cur.fetchone()
+                    result: Optional[tuple[Any, ...]] = cur.fetchone()
+                    return result
         except psycopg.Error as e:
             raise MemoryQueryError(f"Query execution failed: {e}") from e
 
@@ -152,7 +153,8 @@ class PostgresClient:
             with self.connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(query, params)
-                    return cur.fetchall()
+                    result: list[tuple[Any, ...]] = cur.fetchall()
+                    return result
         except psycopg.Error as e:
             raise MemoryQueryError(f"Query execution failed: {e}") from e
 

@@ -43,7 +43,9 @@ class EmbeddingService:
             self._model = SentenceTransformer(self._model_name)
 
             # Update dimension based on actual model
-            self._dimension = self._model.get_sentence_embedding_dimension()
+            model_dim = self._model.get_sentence_embedding_dimension()
+            if model_dim is not None:
+                self._dimension = model_dim
 
         except ImportError as e:
             raise EmbeddingError(
@@ -71,7 +73,8 @@ class EmbeddingService:
         try:
             # SentenceTransformer.encode returns numpy array
             embedding = self._model.encode(text, convert_to_numpy=True)
-            return embedding.tolist()
+            result: list[float] = embedding.tolist()
+            return result
         except Exception as e:
             raise EmbeddingError(f"Failed to generate embedding: {e}") from e
 

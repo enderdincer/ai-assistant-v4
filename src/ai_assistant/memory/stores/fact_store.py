@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from ai_assistant.memory.clients.embeddings import EmbeddingService
 from ai_assistant.memory.clients.postgres import PostgresClient
@@ -196,7 +196,7 @@ class FactStore:
     def get_all_system_facts(self) -> list[Fact]:
         return self.get_facts_by_category(FactCategory.SYSTEM)
 
-    def _row_to_fact(self, row: tuple) -> Fact:
+    def _row_to_fact(self, row: tuple[Any, ...]) -> Fact:
         return Fact(
             id=str(row[0]),
             category=FactCategory(row[1]),

@@ -161,7 +161,7 @@ class ConversationStore:
             "preview": messages[0].content[:100] if messages else "",
         }
 
-    def _row_to_message(self, row: tuple) -> Message:
+    def _row_to_message(self, row: tuple[Any, ...]) -> Message:
         return Message(
             id=str(row[0]),
             session_id=str(row[1]),
@@ -263,7 +263,7 @@ class ConversationStore:
         rows = self._postgres.fetch_all(query, (session_id,))
         return [self._row_to_summary(row) for row in rows]
 
-    def _row_to_summary(self, row: tuple) -> ConversationSummary:
+    def _row_to_summary(self, row: tuple[Any, ...]) -> ConversationSummary:
         return ConversationSummary(
             id=str(row[0]),
             session_id=str(row[1]),

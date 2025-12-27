@@ -81,7 +81,7 @@ class EventLog:
     def get_session_events(self, session_id: str) -> list[EventLogEntry]:
         return self.get_events(session_id=session_id, limit=1000)
 
-    def _row_to_entry(self, row: tuple) -> EventLogEntry:
+    def _row_to_entry(self, row: tuple[Any, ...]) -> EventLogEntry:
         return EventLogEntry(
             id=str(row[0]),
             event_type=row[1],

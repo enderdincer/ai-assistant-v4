@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 from ai_assistant.memory.config import MemoryConfig
 from ai_assistant.memory.exceptions import CollectionNotFoundError, MemoryConnectionError
@@ -90,14 +90,16 @@ class QdrantClient:
 
         query_filter = None
         if filter_conditions:
-            must_conditions = []
+            must_conditions: Sequence[qdrant_models.FieldCondition] = []
+            conditions_list: list[qdrant_models.FieldCondition] = []
             for key, value in filter_conditions.items():
-                must_conditions.append(
+                conditions_list.append(
                     qdrant_models.FieldCondition(
                         key=key,
                         match=qdrant_models.MatchValue(value=value),
                     )
                 )
+            must_conditions = conditions_list
             query_filter = qdrant_models.Filter(must=must_conditions)
 
         try:

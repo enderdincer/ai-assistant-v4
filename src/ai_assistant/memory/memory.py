@@ -307,8 +307,8 @@ class MemoryManager:
             The summary ID
         """
         # Get the messages to extract timestamps
-        messages = [self.conversations.get_message(mid) for mid in message_ids]
-        messages = [m for m in messages if m is not None]
+        messages_or_none = [self.conversations.get_message(mid) for mid in message_ids]
+        messages = [m for m in messages_or_none if m is not None]
 
         if not messages:
             raise ValueError("No valid messages found for the given IDs")
@@ -316,14 +316,17 @@ class MemoryManager:
         # Sort by timestamp
         messages.sort(key=lambda m: m.timestamp)
 
+        first_msg = messages[0]
+        last_msg = messages[-1]
+
         summary_obj = ConversationSummary(
             session_id=session_id,
             summary=summary,
             message_count=len(messages),
-            first_message_id=messages[0].id,
-            last_message_id=messages[-1].id,
-            first_timestamp=messages[0].timestamp,
-            last_timestamp=messages[-1].timestamp,
+            first_message_id=first_msg.id,
+            last_message_id=last_msg.id,
+            first_timestamp=first_msg.timestamp,
+            last_timestamp=last_msg.timestamp,
         )
 
         summary_id = self.conversations.store_summary(summary_obj)
