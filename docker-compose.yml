@@ -58,6 +58,52 @@ services:
       retries: 3
       start_period: 10s
 
+  memory-service:
+    build:
+      context: .
+      dockerfile: services/memory/Dockerfile
+    container_name: ai-assistant-memory
+    restart: unless-stopped
+    ports:
+      - "${MEMORY_HTTP_PORT:-8080}:8080"
+    environment:
+      # Database connections (use container names as hosts)
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-ai_assistant}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-ai_assistant_secret}
+      - POSTGRES_DB=${POSTGRES_DB:-ai_assistant}
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      # MQTT connection
+      - MQTT_HOST=mqtt-broker
+      - MQTT_PORT=1883
+      # Ollama connection (external service)
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
+      # Memory service settings
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-nomic-embed-text}
+      - COMPACTION_MODEL=${COMPACTION_MODEL:-qwen3:1.7b}
+      - COMPACTION_THRESHOLD=${COMPACTION_THRESHOLD:-20}
+      - COMPACTION_KEEP_RECENT=${COMPACTION_KEEP_RECENT:-5}
+      - AUTO_LOG_CONVERSATIONS=${AUTO_LOG_CONVERSATIONS:-true}
+      - AUTO_COMPACT=${AUTO_COMPACT:-true}
+      - HTTP_PORT=8080
+      - HTTP_HOST=0.0.0.0
+      - DEBUG=${DEBUG:-false}
+    depends_on:
+      mqtt-broker:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
 volumes:
   mqtt-data:
     driver: local
