@@ -1,4 +1,4 @@
-from typing import Any, Optional, Sequence
+from typing import Any, Optional, cast
 
 from ai_assistant.memory.config import MemoryConfig
 from ai_assistant.memory.exceptions import CollectionNotFoundError, MemoryConnectionError
@@ -90,7 +90,6 @@ class QdrantClient:
 
         query_filter = None
         if filter_conditions:
-            must_conditions: Sequence[qdrant_models.FieldCondition] = []
             conditions_list: list[qdrant_models.FieldCondition] = []
             for key, value in filter_conditions.items():
                 conditions_list.append(
@@ -99,8 +98,8 @@ class QdrantClient:
                         match=qdrant_models.MatchValue(value=value),
                     )
                 )
-            must_conditions = conditions_list
-            query_filter = qdrant_models.Filter(must=must_conditions)
+            # Cast to Any to satisfy mypy - list is invariant
+            query_filter = qdrant_models.Filter(must=cast(Any, conditions_list))
 
         try:
             response = self._client.query_points(
