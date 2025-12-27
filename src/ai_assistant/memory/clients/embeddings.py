@@ -1,55 +1,120 @@
-from typing import Optional
+"""Local embedding service using sentence-transformers.
+
+Provides text embeddings without external API dependencies.
+The embedding model runs locally, making the memory service self-contained.
+"""
+
+from typing import Optional, TYPE_CHECKING
 
 from ai_assistant.memory.config import MemoryConfig
-from ai_assistant.memory.exceptions import EmbeddingError, MemoryConnectionError
-from ai_assistant.shared.ollama import OllamaClient, OllamaError
+from ai_assistant.memory.exceptions import EmbeddingError
+
+if TYPE_CHECKING:
+    from sentence_transformers import SentenceTransformer
 
 
 class EmbeddingService:
+    """Local embedding service using sentence-transformers.
+
+    Uses a lightweight model that runs locally without requiring
+    external services like Ollama.
+    """
+
+    # Default model - high quality for semantic search
+    # all-mpnet-base-v2: 768 dimensions, ~420MB, best quality
+    DEFAULT_MODEL = "all-mpnet-base-v2"
+    DEFAULT_DIMENSION = 768
+
     def __init__(self, config: Optional[MemoryConfig] = None):
         self._config = config or MemoryConfig.from_env()
-        self._client: Optional[OllamaClient] = None
-        self._model = self._config.embedding_model
-        self._dimension = self._config.embedding_dimension
+        self._model_name = self._config.embedding_model or self.DEFAULT_MODEL
+        self._dimension = self._config.embedding_dimension or self.DEFAULT_DIMENSION
+        self._model: Optional["SentenceTransformer"] = None
 
     def initialize(self) -> None:
-        self._client = OllamaClient(
-            base_url=self._config.ollama_host,
-            timeout=60,
-        )
+        """Initialize the embedding model.
+
+        Loads the sentence-transformers model. The first call will
+        download the model if not already cached.
+        """
         try:
-            models = self._client.list_models()
-            available = [m["name"] for m in models.get("models", [])]
-            if self._model not in available and f"{self._model}:latest" not in available:
-                raise MemoryConnectionError(
-                    f"Embedding model '{self._model}' not available. Run: ollama pull {self._model}"
-                )
-        except OllamaError as e:
-            raise MemoryConnectionError(f"Failed to connect to Ollama: {e}") from e
+            from sentence_transformers import SentenceTransformer
+
+            self._model = SentenceTransformer(self._model_name)
+
+            # Update dimension based on actual model
+            self._dimension = self._model.get_sentence_embedding_dimension()
+
+        except ImportError as e:
+            raise EmbeddingError(
+                "sentence-transformers not installed. "
+                "Install with: pip install sentence-transformers"
+            ) from e
+        except Exception as e:
+            raise EmbeddingError(f"Failed to load embedding model '{self._model_name}': {e}") from e
 
     def embed(self, text: str) -> list[float]:
-        if self._client is None:
-            raise EmbeddingError("EmbeddingService not initialized")
+        """Generate embedding for a single text.
+
+        Args:
+            text: Text to embed
+
+        Returns:
+            List of floats representing the embedding vector
+
+        Raises:
+            EmbeddingError: If model not initialized or embedding fails
+        """
+        if self._model is None:
+            raise EmbeddingError("EmbeddingService not initialized. Call initialize() first.")
+
         try:
-            response = self._client.embeddings(model=self._model, prompt=text)
-            embedding = response.get("embedding", [])
-            if not embedding:
-                raise EmbeddingError("Empty embedding returned from Ollama")
-            return embedding
-        except OllamaError as e:
+            # SentenceTransformer.encode returns numpy array
+            embedding = self._model.encode(text, convert_to_numpy=True)
+            return embedding.tolist()
+        except Exception as e:
             raise EmbeddingError(f"Failed to generate embedding: {e}") from e
 
     def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        return [self.embed(text) for text in texts]
+        """Generate embeddings for multiple texts.
+
+        More efficient than calling embed() multiple times as it
+        batches the computation.
+
+        Args:
+            texts: List of texts to embed
+
+        Returns:
+            List of embedding vectors
+
+        Raises:
+            EmbeddingError: If model not initialized or embedding fails
+        """
+        if self._model is None:
+            raise EmbeddingError("EmbeddingService not initialized. Call initialize() first.")
+
+        if not texts:
+            return []
+
+        try:
+            embeddings = self._model.encode(texts, convert_to_numpy=True)
+            return [e.tolist() for e in embeddings]
+        except Exception as e:
+            raise EmbeddingError(f"Failed to generate embeddings: {e}") from e
 
     @property
     def dimension(self) -> int:
+        """Get the embedding dimension."""
         return self._dimension
 
+    @property
+    def model_name(self) -> str:
+        """Get the model name."""
+        return self._model_name
+
     def close(self) -> None:
-        if self._client is not None:
-            self._client.close()
-            self._client = None
+        """Clean up resources."""
+        self._model = None
 
     def __enter__(self) -> "EmbeddingService":
         self.initialize()

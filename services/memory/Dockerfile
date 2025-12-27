@@ -25,6 +25,10 @@ RUN touch ./services/__init__.py
 # Install base dependencies + memory + mqtt + api extras
 RUN pip install --no-cache-dir -e ".[memory,mqtt,api]"
 
+# Pre-download the embedding model during build (not at runtime)
+# This downloads all-mpnet-base-v2 (~420MB) into the container
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-mpnet-base-v2')"
+
 # Expose HTTP API port
 EXPOSE 8080
 

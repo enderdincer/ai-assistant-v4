@@ -4,8 +4,12 @@ Provides persistent memory storage and retrieval:
 1. Listens to transcriptions and assistant responses for auto-logging
 2. Handles memory query requests and returns context
 3. Stores facts from extraction service
-4. Auto-compacts long conversations
-5. Manages sessions and provides HTTP API for session CRUD
+4. Manages sessions and provides HTTP API for session CRUD
+
+Note: This service does NOT perform summarization or compaction.
+Summarization should be handled by external services if needed.
+The memory service uses local embeddings (sentence-transformers) and
+does not require Ollama or any external LLM.
 """
 
 import os
@@ -39,7 +43,6 @@ class MemoryServiceConfig(ServiceConfig):
 
     Attributes:
         auto_log_conversations: Whether to auto-log transcriptions/responses
-        auto_compact: Whether to auto-compact long conversations
         default_session_id: Default session ID for voice transcriptions
         http_port: Port for the HTTP API server
         http_host: Host to bind the HTTP server to
@@ -53,15 +56,13 @@ class MemoryServiceConfig(ServiceConfig):
     postgres_db: str = "ai_assistant"
     qdrant_host: str = "localhost"
     qdrant_port: int = 6333
-    ollama_host: str = "http://localhost:11434"
-    embedding_model: str = "nomic-embed-text"
-    compaction_model: str = "qwen3:1.7b"
-    compaction_threshold: int = 20
-    compaction_keep_recent: int = 5
+
+    # Embedding settings (local sentence-transformers model)
+    embedding_model: str = "all-mpnet-base-v2"
+    embedding_dimension: int = 768
 
     # Service-specific settings
     auto_log_conversations: bool = True
-    auto_compact: bool = True
     # Default session ID - must be a valid UUID for PostgreSQL
     default_session_id: str = "00000000-0000-0000-0000-000000000000"
 
@@ -81,14 +82,10 @@ class MemoryServiceConfig(ServiceConfig):
             postgres_db=os.getenv("POSTGRES_DB", "ai_assistant"),
             qdrant_host=os.getenv("QDRANT_HOST", "localhost"),
             qdrant_port=int(os.getenv("QDRANT_PORT", "6333")),
-            ollama_host=os.getenv("OLLAMA_HOST", "http://localhost:11434"),
-            embedding_model=os.getenv("EMBEDDING_MODEL", "nomic-embed-text"),
-            compaction_model=os.getenv("COMPACTION_MODEL", "qwen3:1.7b"),
-            compaction_threshold=int(os.getenv("COMPACTION_THRESHOLD", "20")),
-            compaction_keep_recent=int(os.getenv("COMPACTION_KEEP_RECENT", "5")),
+            embedding_model=os.getenv("EMBEDDING_MODEL", "all-mpnet-base-v2"),
+            embedding_dimension=int(os.getenv("EMBEDDING_DIMENSION", "768")),
             auto_log_conversations=os.getenv("AUTO_LOG_CONVERSATIONS", "true").lower()
             in ("1", "true", "yes"),
-            auto_compact=os.getenv("AUTO_COMPACT", "true").lower() in ("1", "true", "yes"),
             # Default session ID - must be a valid UUID for PostgreSQL
             default_session_id=os.getenv(
                 "DEFAULT_SESSION_ID", "00000000-0000-0000-0000-000000000000"
@@ -110,11 +107,8 @@ class MemoryServiceConfig(ServiceConfig):
             postgres_db=self.postgres_db,
             qdrant_host=self.qdrant_host,
             qdrant_port=self.qdrant_port,
-            ollama_host=self.ollama_host,
             embedding_model=self.embedding_model,
-            compaction_model=self.compaction_model,
-            compaction_threshold=self.compaction_threshold,
-            compaction_keep_recent=self.compaction_keep_recent,
+            embedding_dimension=self.embedding_dimension,
         )
 
 
@@ -374,7 +368,6 @@ class MemoryService(BaseService):
                     role=role,
                     content=content,
                     metadata=metadata,
-                    auto_compact=self._memory_config.auto_compact,
                 )
                 self._logger.debug(f"Logged {role} message: {message_id}")
 

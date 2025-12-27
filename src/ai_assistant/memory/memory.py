@@ -1,3 +1,16 @@
+"""Memory Manager - Core interface for the memory system.
+
+Provides a unified interface for:
+- Storing and retrieving conversation messages
+- Managing facts (learned information)
+- Semantic search across conversations and facts
+- Session management
+
+The memory system uses local embeddings (sentence-transformers) and does NOT
+perform any summarization or compaction. Summarization should be handled
+by external services if needed.
+"""
+
 from typing import Any, Optional
 from uuid import uuid4
 
@@ -16,13 +29,36 @@ from ai_assistant.memory.stores.conversation_store import ConversationStore
 from ai_assistant.memory.stores.event_log import EventLog
 from ai_assistant.memory.stores.fact_store import FactStore
 
-try:
-    from ai_assistant.shared.ollama import OllamaClient
-except ImportError:
-    OllamaClient = None  # type: ignore
-
 
 class MemoryManager:
+    """Main interface for the memory system.
+
+    Provides methods for:
+    - Logging and retrieving conversations
+    - Storing and searching facts
+    - Getting context for queries (semantic search)
+    - Session management
+
+    Example:
+        ```python
+        config = MemoryConfig()
+        manager = MemoryManager(config)
+        manager.initialize()
+
+        # Log a conversation
+        manager.log_conversation(
+            session_id="session-123",
+            role="user",
+            content="What's the weather like?"
+        )
+
+        # Search for relevant context
+        context = manager.get_context_for_query("weather forecast")
+
+        manager.close()
+        ```
+    """
+
     def __init__(self, config: Optional[MemoryConfig] = None):
         self._config = config or MemoryConfig.from_env()
         self._postgres: Optional[PostgresClient] = None
@@ -34,6 +70,7 @@ class MemoryManager:
         self._initialized = False
 
     def initialize(self) -> None:
+        """Initialize all database connections and the embedding service."""
         if self._initialized:
             return
 
@@ -53,6 +90,7 @@ class MemoryManager:
         self._initialized = True
 
     def close(self) -> None:
+        """Close all connections and clean up resources."""
         if self._embeddings:
             self._embeddings.close()
             self._embeddings = None
@@ -72,18 +110,21 @@ class MemoryManager:
 
     @property
     def facts(self) -> FactStore:
+        """Get the fact store for direct fact operations."""
         if self._fact_store is None:
             raise RuntimeError("MemoryManager not initialized")
         return self._fact_store
 
     @property
     def events(self) -> EventLog:
+        """Get the event log for direct event operations."""
         if self._event_log is None:
             raise RuntimeError("MemoryManager not initialized")
         return self._event_log
 
     @property
     def conversations(self) -> ConversationStore:
+        """Get the conversation store for direct conversation operations."""
         if self._conversation_store is None:
             raise RuntimeError("MemoryManager not initialized")
         return self._conversation_store
@@ -95,10 +136,27 @@ class MemoryManager:
         max_facts: int = 5,
         max_similar: int = 3,
     ) -> MemoryContext:
+        """Get relevant context for a query.
+
+        Searches for:
+        - Relevant facts (semantic search)
+        - Recent messages in the current session
+        - Similar conversations from other sessions
+
+        Args:
+            query: The query text to find context for
+            session_id: Optional session ID to get recent messages from
+            max_facts: Maximum number of facts to return
+            max_similar: Maximum number of similar conversations to return
+
+        Returns:
+            MemoryContext with relevant facts, messages, and similar conversations
+        """
         relevant_facts = self.facts.search_facts(query, limit=max_facts)
 
         recent_messages: list[Message] = []
         if session_id:
+            # Include any existing summaries
             summaries = self.conversations.get_session_summaries(session_id)
             for summary in summaries:
                 recent_messages.append(
@@ -111,6 +169,7 @@ class MemoryManager:
                     )
                 )
 
+            # Get recent messages from the session
             session_messages = self.conversations.get_session(session_id)
             recent_messages.extend(session_messages[-10:])
 
@@ -134,6 +193,18 @@ class MemoryManager:
         confidence: float = 0.8,
         source: str = "conversation",
     ) -> str:
+        """Store a learned fact.
+
+        Args:
+            subject: The subject of the fact (e.g., "user", "project")
+            attribute: The attribute name (e.g., "name", "preference")
+            value: The attribute value
+            confidence: Confidence score (0-1)
+            source: Source of the fact
+
+        Returns:
+            The fact ID
+        """
         fact = Fact.create_learned_fact(
             subject=subject,
             attribute=attribute,
@@ -149,8 +220,18 @@ class MemoryManager:
         role: str,
         content: str,
         metadata: Optional[dict[str, Any]] = None,
-        auto_compact: bool = True,
     ) -> str:
+        """Log a conversation message.
+
+        Args:
+            session_id: Session ID for the conversation
+            role: Message role (user, assistant, system)
+            content: Message content
+            metadata: Optional metadata dict
+
+        Returns:
+            The message ID
+        """
         message_id = self.conversations.store_message(
             session_id=session_id,
             role=role,
@@ -169,9 +250,6 @@ class MemoryManager:
             metadata=metadata,
         )
 
-        if auto_compact:
-            self.maybe_compact_session(session_id)
-
         return message_id
 
     def add_system_fact(
@@ -180,6 +258,18 @@ class MemoryManager:
         attribute: str,
         value: str,
     ) -> str:
+        """Add an immutable system fact.
+
+        System facts cannot be modified or deleted once created.
+
+        Args:
+            subject: The subject of the fact
+            attribute: The attribute name
+            value: The attribute value
+
+        Returns:
+            The fact ID
+        """
         fact = Fact.create_system_fact(
             subject=subject,
             attribute=attribute,
@@ -188,112 +278,80 @@ class MemoryManager:
         return self.facts.add_fact(fact)
 
     def create_session(self) -> str:
+        """Create a new session ID.
+
+        Returns:
+            A new UUID string for the session
+        """
         return str(uuid4())
 
-    def compact_session(self, session_id: str, force: bool = False) -> Optional[str]:
-        message_count = self.conversations.get_session_message_count(session_id)
+    def store_summary(
+        self,
+        session_id: str,
+        summary: str,
+        message_ids: list[str],
+        delete_summarized: bool = False,
+    ) -> str:
+        """Store a conversation summary.
 
-        if not force and message_count < self._config.compaction_threshold:
-            return None
+        This allows external services to provide summaries for conversations.
+        The memory service does NOT generate summaries itself.
 
-        messages_to_compact = self.conversations.get_compactable_messages(
+        Args:
+            session_id: Session ID the summary belongs to
+            summary: The summary text
+            message_ids: IDs of messages that were summarized
+            delete_summarized: Whether to delete the summarized messages
+
+        Returns:
+            The summary ID
+        """
+        # Get the messages to extract timestamps
+        messages = [self.conversations.get_message(mid) for mid in message_ids]
+        messages = [m for m in messages if m is not None]
+
+        if not messages:
+            raise ValueError("No valid messages found for the given IDs")
+
+        # Sort by timestamp
+        messages.sort(key=lambda m: m.timestamp)
+
+        summary_obj = ConversationSummary(
             session_id=session_id,
-            keep_recent=self._config.compaction_keep_recent,
+            summary=summary,
+            message_count=len(messages),
+            first_message_id=messages[0].id,
+            last_message_id=messages[-1].id,
+            first_timestamp=messages[0].timestamp,
+            last_timestamp=messages[-1].timestamp,
         )
 
-        if len(messages_to_compact) < 5:
-            return None
+        summary_id = self.conversations.store_summary(summary_obj)
 
-        summary_text = self._generate_summary(messages_to_compact)
-        if not summary_text:
-            return None
+        # Optionally delete the summarized messages
+        if delete_summarized:
+            self.conversations.delete_messages(message_ids)
 
-        summary = ConversationSummary(
-            session_id=session_id,
-            summary=summary_text,
-            message_count=len(messages_to_compact),
-            first_message_id=messages_to_compact[0].id,
-            last_message_id=messages_to_compact[-1].id,
-            first_timestamp=messages_to_compact[0].timestamp,
-            last_timestamp=messages_to_compact[-1].timestamp,
-        )
-
-        summary_id = self.conversations.store_summary(summary)
-
-        message_ids = [m.id for m in messages_to_compact]
-        deleted = self.conversations.delete_messages(message_ids)
-
-        self.events.log_event(
-            event_type="compaction",
-            session_id=session_id,
-            data={
-                "summary_id": summary_id,
-                "messages_compacted": len(messages_to_compact),
-                "messages_deleted": deleted,
-                "summary_preview": summary_text[:200],
-            },
-        )
+            self.events.log_event(
+                event_type="summary_with_deletion",
+                session_id=session_id,
+                data={
+                    "summary_id": summary_id,
+                    "messages_summarized": len(messages),
+                    "messages_deleted": len(message_ids),
+                },
+            )
+        else:
+            self.events.log_event(
+                event_type="summary",
+                session_id=session_id,
+                data={
+                    "summary_id": summary_id,
+                    "messages_summarized": len(messages),
+                },
+            )
 
         return summary_id
-
-    def _generate_summary(self, messages: list[Message]) -> Optional[str]:
-        if OllamaClient is None:
-            return self._generate_simple_summary(messages)
-
-        model = self._config.compaction_model
-        if not model:
-            return self._generate_simple_summary(messages)
-
-        conversation_text = "\n".join(f"{m.role.upper()}: {m.content}" for m in messages)
-
-        prompt = f"""Summarize the following conversation in 2-3 sentences, capturing the key topics discussed and any important information exchanged:
-
-{conversation_text}
-
-Summary:"""
-
-        try:
-            client = OllamaClient(
-                base_url=self._config.ollama_host,
-                timeout=60,
-            )
-            response = client.generate(
-                model=model,
-                prompt=prompt,
-                options={"temperature": 0.3},
-            )
-            client.close()
-
-            if isinstance(response, dict):
-                return response.get("response", "").strip()
-            return None
-        except Exception:
-            return self._generate_simple_summary(messages)
-
-    def _generate_simple_summary(self, messages: list[Message]) -> str:
-        user_messages = [m for m in messages if m.role == "user"]
-        assistant_messages = [m for m in messages if m.role == "assistant"]
-
-        topics: list[str] = []
-        for m in user_messages[:3]:
-            preview = m.content[:50]
-            if len(m.content) > 50:
-                preview += "..."
-            topics.append(preview)
-
-        summary_parts = [
-            f"Conversation with {len(messages)} messages.",
-            f"User asked about: {'; '.join(topics)}" if topics else "",
-            f"({len(user_messages)} user, {len(assistant_messages)} assistant messages)",
-        ]
-
-        return " ".join(part for part in summary_parts if part)
-
-    def maybe_compact_session(self, session_id: str) -> Optional[str]:
-        message_count = self.conversations.get_session_message_count(session_id)
-        if message_count >= self._config.compaction_threshold:
-            return self.compact_session(session_id)
-        return None
 
     # =========================================================================
     # Session Management
