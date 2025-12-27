@@ -49,7 +49,7 @@ class ServiceConfig:
         else LogLevel.INFO
     )
     health_check_interval: float = field(
-        default_factory=lambda: float(os.getenv("HEALTH_CHECK_INTERVAL", "30"))
+        default_factory=lambda: float(os.getenv("HEALTH_CHECK_INTERVAL", "1"))
     )
 
     def to_mqtt_config(self) -> MQTTConfig:
