@@ -1,0 +1,67 @@
+name: Memory Service Deploy
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'services/memory/**'
+      - 'src/ai_assistant/memory/**'
+      - 'src/ai_assistant/shared/**'
+      - 'pyproject.toml'
+      - '.github/workflows/memory-deploy.yml'
+
+jobs:
+  build-and-deploy:
+    permissions:
+      id-token: write
+      contents: write
+      packages: write
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install -e ".[memory,mqtt,api]"
+
+      - name: Type check
+        run: |
+          pip install mypy types-requests
+          mypy src/ai_assistant/memory --ignore-missing-imports
+
+      - name: Login to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ vars.IMAGE_REGISTRY }}
+          username: ${{ vars.IMAGE_REGISTRY_OWNER }}
+          password: ${{ secrets.IMAGE_REGISTRY_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Semantic Release Version
+        id: semantic_release
+        uses: cycjimmy/semantic-release-action@v4
+        with:
+          extra_plugins: |
+            conventional-changelog-conventionalcommits@8
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./services/memory/Dockerfile
+          push: true
+          tags: |
+            ${{ vars.IMAGE_REGISTRY }}/${{ vars.IMAGE_REGISTRY_OWNER }}/ai-assistant-memory:latest${{ steps.semantic_release.outputs.new_release_version && format(',{0}/{1}/ai-assistant-memory:{2}', vars.IMAGE_REGISTRY, vars.IMAGE_REGISTRY_OWNER, steps.semantic_release.outputs.new_release_version) || '' }}
