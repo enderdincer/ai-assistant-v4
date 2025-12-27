@@ -4,12 +4,6 @@ on:
   push:
     branches:
       - main
-    paths:
-      - 'services/memory/**'
-      - 'src/ai_assistant/memory/**'
-      - 'src/ai_assistant/shared/**'
-      - 'pyproject.toml'
-      - '.github/workflows/memory-deploy.yml'
 
 jobs:
   build-and-deploy:
