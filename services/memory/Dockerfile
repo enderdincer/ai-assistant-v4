@@ -21,13 +21,17 @@ COPY services/memory/ ./services/memory/
 # Create services __init__.py for package structure
 RUN touch ./services/__init__.py
 
+# Install CPU-only PyTorch first (much smaller than CUDA version)
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+
 # Install Python dependencies
 # Install base dependencies + memory + mqtt + api extras
 RUN pip install --no-cache-dir -e ".[memory,mqtt,api]"
 
-# Pre-download the embedding model during build (not at runtime)
-# This downloads all-mpnet-base-v2 (~420MB) into the container
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-mpnet-base-v2')"
+# Embedding models will be downloaded at runtime to a mounted PVC
+# Set the cache directory for sentence-transformers/huggingface
+ENV HF_HOME=/data/models
+ENV SENTENCE_TRANSFORMERS_HOME=/data/models
 
 # Expose HTTP API port
 EXPOSE 8080
