@@ -167,6 +167,13 @@ class Topics:
         event_type="session.current",
     )
 
+    EVENT_HEARTBEAT = TopicDefinition(
+        category=TopicCategory.EVENTS,
+        name="heartbeat",
+        description="Periodic heartbeat messages from heartbeat service",
+        event_type="system.heartbeat",
+    )
+
     # =========================================================================
     # Action topics
     # =========================================================================
